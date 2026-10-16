@@ -147,10 +147,23 @@ Your original unmodded game files are 100% restored.
     execSync(`powershell -NoProfile -Command "${psScript}"`, { stdio: "inherit" });
 
     const zipStat = fs.statSync(zipPath);
+
+    // 6. Generate SHA256SUMS.txt
+    const crypto = require("crypto");
+    const filesToHash = ["ShapezCoopInstaller.exe", zipName];
+    const checksumLines = filesToHash.map(file => {
+        const filePath = path.join(DIST_DIR, file);
+        const hash = crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+        return `${hash}  ${file}`;
+    });
+    const checksumPath = path.join(DIST_DIR, "SHA256SUMS.txt");
+    fs.writeFileSync(checksumPath, checksumLines.join("\n") + "\n", "utf8");
+
     console.log(`\n========================================================`);
     console.log(`Distribution package ready!`);
     console.log(` Zip archive: ${zipPath} (${(zipStat.size / 1024).toFixed(1)} KB)`);
     console.log(` Installer:   ${outputExe} (${(exeStat.size / 1024).toFixed(1)} KB)`);
+    console.log(` Checksums:   ${checksumPath}`);
     console.log(`========================================================\n`);
 }
 
