@@ -382,7 +382,9 @@ async function verifyMainProcessAndModEndToEnd() {
             stateEntered: new Signal(),
         };
 
-        const modSource = fs.readFileSync(TARGET_MOD_FILE, "utf8");
+        const sourceModPath = path.join(__dirname, "..", "src", "steam_multiplayer.js");
+        const modPath = fs.existsSync(TARGET_MOD_FILE) ? TARGET_MOD_FILE : sourceModPath;
+        const modSource = fs.readFileSync(modPath, "utf8");
         let registeredModClass = null;
         let registeredMeta = null;
 
