@@ -723,7 +723,24 @@ namespace ShapezCoopInstaller
             for (int i = 0; i < args.Length; i++)
             {
                 string a = args[i].ToLowerInvariant();
-                if (a == "--silent" || a == "-s" || a == "/silent") isSilent = true;
+                if (a == "--help" || a == "-h" || a == "/?" || a == "-?")
+                {
+                    AttachConsole(ATTACH_PARENT_PROCESS);
+                    Console.WriteLine("\nshapez.io Steam Co-op Multiplayer Installer v1.0.0");
+                    Console.WriteLine("Usage: ShapezCoopInstaller.exe [options]");
+                    Console.WriteLine("  --silent, -s       Install mod and patches quietly without UI");
+                    Console.WriteLine("  --uninstall, -u    Uninstall mod and restore vanilla shapez.io");
+                    Console.WriteLine("  --path <dir>       Specify custom shapez.io installation path");
+                    Console.WriteLine("  --help, -h         Show this help message");
+                    return 0;
+                }
+                else if (a == "--version" || a == "-v")
+                {
+                    AttachConsole(ATTACH_PARENT_PROCESS);
+                    Console.WriteLine("1.0.0");
+                    return 0;
+                }
+                else if (a == "--silent" || a == "-s" || a == "/silent") isSilent = true;
                 else if (a == "--uninstall" || a == "-u" || a == "/uninstall") isUninstall = true;
                 else if (a == "--path" && i + 1 < args.Length)
                 {

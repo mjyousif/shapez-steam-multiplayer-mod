@@ -12,7 +12,9 @@
         "install-mod": "node scripts/install-mod.js",
         "uninstall-mod": "node scripts/uninstall-mod.js",
         "verify": "node scripts/verify-mod.js",
-        "test": "node scripts/verify-mod.js",
+        "test:unit": "node --test tests/*.test.js",
+        "test:e2e": "node scripts/verify-mod.js",
+        "test": "node --test tests/*.test.js && node scripts/verify-mod.js",
         "package": "node scripts/build-dist.js",
         "build-dist": "node scripts/build-dist.js",
         "launch-client": "node scripts/launch-coop-client.js"
