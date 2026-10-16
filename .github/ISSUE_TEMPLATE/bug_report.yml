@@ -1,0 +1,71 @@
+name: Bug Report
+description: Report an issue with the Steam Co-op Mod or Installer
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please provide as much context as possible.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where did the problem occur?
+      options:
+        - "Installer (ShapezCoopInstaller.exe / Install-Mod.bat)"
+        - "In-Game Menu / Steam Lobby"
+        - "Multiplayer Gameplay Sync (Buildings, Upgrades, Hub)"
+        - "Game Crash / Launch Failure"
+    validations:
+      required: true
+
+  - type: input
+    id: game_version
+    attributes:
+      label: shapez.io Game Version
+      description: e.g. Steam v1.5.7, Standalone, or itch.io
+      placeholder: Steam v1.5.7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Session Role
+      options:
+        - "Host"
+        - "Client (joined via Steam)"
+        - "Client (joined via direct IP/Port)"
+        - "N/A (Installer issue)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      description: How can someone reproduce this behavior?
+      placeholder: |
+        1. Host starts a new game
+        2. Client joins lobby
+        3. Client places cutter at (20, 30)
+        4. See desync error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console Logs / Error Output
+      description: Copy logs from shapez developer console (F12) or installer output.
+      render: shell
