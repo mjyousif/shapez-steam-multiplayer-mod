@@ -1,0 +1,14 @@
+{
+    "scripts": {
+        "start": "electron --disable-direct-composition --in-process-gpu ."
+    },
+    "devDependencies": {},
+    "dependencies": {
+        "async-lock": "^1.2.8",
+        "electron": "16.2.8",
+        "electron-window-state": "^5.0.3"
+    },
+    "optionalDependencies": {
+        "shapez.io-private-artifacts": "github:tobspr/shapez.io-private-artifacts#abi-v99"
+    }
+}
