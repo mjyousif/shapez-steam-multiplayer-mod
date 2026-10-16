@@ -50,7 +50,7 @@ jobs:
 
       # Permanent Versioned Release for Git Tags (e.g. v1.0.0)
       - name: Publish Versioned Milestone Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: "shapez Steam Co-op Mod ${{ github.ref_name }}"
@@ -64,7 +64,7 @@ jobs:
 
       # Rolling Continuous Release for Commits to master
       - name: Publish Continuous Pre-Release (latest-dev)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: github.ref == 'refs/heads/master'
         with:
           tag_name: latest-dev
