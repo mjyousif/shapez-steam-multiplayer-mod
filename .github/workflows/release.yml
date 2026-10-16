@@ -40,7 +40,7 @@ jobs:
         run: node --test tests/installer-cli.test.js
 
       - name: Attest Build Provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         continue-on-error: true
         with:
           subject-path: |
