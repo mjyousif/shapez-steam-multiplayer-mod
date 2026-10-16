@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { patchAsarArchive } = require("../scripts/install-mod");
+const { patchAsarArchive, patchIndexJs } = require("../scripts/install-mod");
 
 function createMockAsar(filesMap) {
     const headerObj = { files: {} };
@@ -108,4 +108,52 @@ describe("ASAR Patching and Pickle Serialization", () => {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
     });
+
+    test("patchIndexJs ensures roamingFolder is declared before any usage (no TDZ reference error)", () => {
+        const mockVanillaIndex = `
+const isDev = app.commandLine.hasSwitch("dev");
+const isLocal = app.commandLine.hasSwitch("local");
+const safeMode = app.commandLine.hasSwitch("safe-mode");
+const externalMod = app.commandLine.getSwitchValue("load-mod");
+
+const roamingFolder =
+    process.env.APPDATA ||
+    (process.platform == "darwin"
+        ? process.env.HOME + "/Library/Preferences"
+        : process.env.HOME + "/.local/share");
+
+let storePath = path.join(roamingFolder, "shapez.io", "saves");
+let modsPath = path.join(roamingFolder, "shapez.io", "mods");
+
+title: "shapez",
+mainWindowState.manage(win);
+win.on("closed", () => {
+    console.log("Window closed");
+    win = null;
 });
+if (!app.requestSingleInstanceLock()) {
+    app.exit(0);
+} else {
+steam.init(isDev);
+if (mods.length === 0) {
+    steam.listen();
+}
+`;
+        const patched = patchIndexJs(mockVanillaIndex);
+
+        const declMatch = patched.match(/const\s+roamingFolder\s*=/);
+        assert(declMatch, "roamingFolder declaration must be present");
+        const declIndex = declMatch.index;
+
+        // Find the very first occurrence of roamingFolder
+        const firstOccurrence = patched.indexOf("roamingFolder");
+        // It must be at the declaration, not before it
+        assert.strictEqual(
+            firstOccurrence,
+            declIndex + (declMatch[0].indexOf("roamingFolder")),
+            "roamingFolder must not be referenced before its declaration"
+        );
+        assert(patched.includes("customUserData = path.join(roamingFolder"), "customUserData must be configured");
+    });
+});
+
