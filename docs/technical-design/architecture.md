@@ -45,7 +45,7 @@ flowchart TB
 
 ## 2. Process Responsibilities
 
-### 2.1 Electron Main Process (`src/asar-patches/index.js`, `steam.js`)
+### 2.1 Electron Main Process (`src/steam_bridge.js` & patched `index.js`)
 * **Environment**: Full Node.js runtime with access to native OS libraries, the filesystem, and C++ native Node addons (`.node`).
 * **Responsibilities**:
   * **Steamworks Bridge**: Initializes and interfaces with Greenworks (`shapez.io-private-artifacts/steam/greenworks`). Exposes Steam Lobby management, Steam Friends presence, Steam Overlay triggers, and Rich Presence to the renderer via Electron IPC.
@@ -53,7 +53,7 @@ flowchart TB
   * **Multi-Instance Isolation**: Inspects command-line switches (`--multi-instance`, `--instance-id`) and relocates Electron's `userData` and save game directories so multiple game clients can run concurrently on one machine without database collisions.
   * **Steam Lifecycle Unlocking**: Overrides the vanilla restriction where `steam.listen()` was skipped if any mod was loaded.
 
-### 2.2 Preload Context Bridge (`src/asar-patches/preload.js`)
+### 2.2 Preload Context Bridge (Dynamically Patched `preload.js`)
 * **Environment**: Isolated context executing before web scripts load.
 * **Responsibilities**:
   * Exposes a secure, limited subset of `ipcRenderer` to `window.ipcRenderer` using Electron's `contextBridge.exposeInMainWorld`.
@@ -143,7 +143,7 @@ As a result, loading any mod caused:
 * In-game Steam overlay invite hooks were ignored.
 
 ### 4.2 The Patched Lifecycle
-In `src/asar-patches/index.js`, `steam.listen()` is called unconditionally:
+In the dynamically patched `index.js`, `steam.listen()` is called unconditionally:
 ```javascript
 steam.init(isDev, allowMultiInstance);
 steam.listen(); // <-- Always executed, keeping Steam active

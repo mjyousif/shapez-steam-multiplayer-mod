@@ -15,8 +15,9 @@ const MODS_DIR = path.join(ROAMING_DIR, "shapez.io", "mods");
 const TARGET_MOD_FILE = path.join(MODS_DIR, "steam_multiplayer.js");
 
 const WORKSPACE_ROOT = path.resolve(__dirname, "..");
-const PATCHES_DIR = path.join(WORKSPACE_ROOT, "src", "asar-patches");
-const SOURCE_MOD_FILE = path.join(WORKSPACE_ROOT, "src", "steam_multiplayer.js");
+const SRC_DIR = path.join(WORKSPACE_ROOT, "src");
+const SOURCE_MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
+const SOURCE_BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
 
 function computeIntegrity(buffer) {
     const hash = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -28,7 +29,72 @@ function computeIntegrity(buffer) {
     };
 }
 
-function patchAsarArchive(sourceAsarPath, targetAsarPath, replacements) {
+function readAsarFile(rawAsar, headerObj, headerSize, fileName) {
+    const files = headerObj.files;
+    if (!files || !files[fileName]) return null;
+    const entry = files[fileName];
+    const payloadOffset = 8 + headerSize;
+    const start = payloadOffset + Number(entry.offset);
+    return rawAsar.subarray(start, start + entry.size);
+}
+
+function patchIndexJs(src) {
+    let out = src;
+    if (!out.includes("allowMultiInstance")) {
+        out = out.replace(
+            /const\s+externalMod\s*=\s*app\.commandLine\.getSwitchValue\("load-mod"\);/,
+            `const allowMultiInstance = app.commandLine.hasSwitch("multi-instance");\nconst externalMod = app.commandLine.getSwitchValue("load-mod");\nconst instanceId = app.commandLine.getSwitchValue("instance-id") || (allowMultiInstance ? String(process.pid) : "");\n\nif (allowMultiInstance && instanceId) {\n    const customUserData = path.join(roamingFolder, "shapez.io", "instances", "instance-" + instanceId);\n    fs.mkdirSync(customUserData, { recursive: true });\n    app.setPath("userData", customUserData);\n}`
+        );
+        out = out.replace(
+            /let\s+storePath\s*=\s*path\.join\(roamingFolder,\s*"shapez\.io",\s*"saves"\);/,
+            `let storePath =\n    allowMultiInstance && instanceId\n        ? path.join(roamingFolder, "shapez.io", "saves-" + instanceId)\n        : path.join(roamingFolder, "shapez.io", "saves");`
+        );
+        out = out.replace(
+            /title:\s*"shapez",/,
+            `title: allowMultiInstance ? "shapez (Co-op Instance)" : "shapez",`
+        );
+        out = out.replace(
+            /mainWindowState\.manage\(win\);/,
+            `steam.setMainWindow(win);\n\n    if (!allowMultiInstance) {\n        mainWindowState.manage(win);\n    }`
+        );
+        out = out.replace(
+            /win\.on\("closed",\s*\(\)\s*=>\s*\{[\r\n\s]*console\.log\("Window closed"\);[\r\n\s]*win\s*=\s*null;[\r\n\s]*\}\);/,
+            `win.on("closed", () => {\n        console.log("Window closed");\n        steam.setMainWindow(null);\n        win = null;\n    });`
+        );
+        out = out.replace(
+            /if\s*\(!app\.requestSingleInstanceLock\(\)\)\s*\{[\r\n\s]*app\.exit\(0\);[\r\n\s]*\}\s*else\s*\{/,
+            `if (!allowMultiInstance && !app.requestSingleInstanceLock()) {\n    app.exit(0);\n} else if (!allowMultiInstance) {`
+        );
+    }
+
+    out = out.replace(
+        /steam\.init\(isDev\);[\s\S]*?if\s*\(mods\.length\s*===\s*0\)\s*\{\s*steam\.listen\(\);\s*\}/,
+        `steam.init(isDev, allowMultiInstance);\nsteam.listen();`
+    );
+
+    return out;
+}
+
+function patchPreloadJs(src) {
+    let out = src;
+    if (!out.includes("removeListener")) {
+        out = out.replace(
+            /on:\s*ipcRenderer\.on\.bind\(ipcRenderer\),?/,
+            `on: (channel, listener) => {\n        const wrapped = (event, ...args) => listener(event, ...args);\n        ipcRenderer.on(channel, wrapped);\n        return () => ipcRenderer.removeListener(channel, wrapped);\n    },`
+        );
+    }
+    return out;
+}
+
+function patchSteamJs(src) {
+    let out = src;
+    if (!out.includes("steam_bridge")) {
+        out += `\n// Hook shapez-steam-multiplayer-mod bridge\ntry {\n    const _steamBridge = require("./steam_bridge");\n    module.exports = _steamBridge;\n} catch (err) {\n    console.warn("Failed to load steam_bridge:", err);\n}\n`;
+    }
+    return out;
+}
+
+function patchAsarArchive(sourceAsarPath, targetAsarPath, replacements = null) {
     const rawAsar = fs.readFileSync(sourceAsarPath);
 
     const picklePayloadSize = rawAsar.readUInt32LE(0);
@@ -43,10 +109,35 @@ function patchAsarArchive(sourceAsarPath, targetAsarPath, replacements) {
     const headerObj = JSON.parse(headerJsonStr);
     const originalPayload = rawAsar.subarray(payloadOffset);
 
+    // If specific replacements were passed (e.g. in unit tests), use them directly.
+    // Otherwise, dynamically patch user's local files and add steam_bridge.js.
+    let finalReplacements = replacements;
+    if (!finalReplacements) {
+        const rawIndex = readAsarFile(rawAsar, headerObj, headerSize, "index.js");
+        const rawPreload = readAsarFile(rawAsar, headerObj, headerSize, "preload.js");
+        const rawSteam = readAsarFile(rawAsar, headerObj, headerSize, "steam.js");
+
+        if (!rawIndex || !rawPreload || !rawSteam) {
+            throw new Error("Expected index.js, preload.js, and steam.js in source ASAR archive.");
+        }
+
+        const patchedIndex = patchIndexJs(rawIndex.toString("utf8"));
+        const patchedPreload = patchPreloadJs(rawPreload.toString("utf8"));
+        const patchedSteam = patchSteamJs(rawSteam.toString("utf8"));
+        const bridgeBuffer = fs.readFileSync(SOURCE_BRIDGE_FILE);
+
+        finalReplacements = {
+            "index.js": Buffer.from(patchedIndex, "utf8"),
+            "preload.js": Buffer.from(patchedPreload, "utf8"),
+            "steam.js": Buffer.from(patchedSteam, "utf8"),
+            "steam_bridge.js": bridgeBuffer,
+        };
+    }
+
     let currentEndOffset = originalPayload.length;
     const appendedBuffers = [];
 
-    for (const [fileName, fileBuffer] of Object.entries(replacements)) {
+    for (const [fileName, fileBuffer] of Object.entries(finalReplacements)) {
         headerObj.files[fileName] = {
             size: fileBuffer.length,
             offset: String(currentEndOffset),
@@ -89,13 +180,8 @@ function main() {
     }
 
     // 2. Patch app.asar from clean vanilla backup
-    console.log("[2/3] Patching index.js, steam.js, and preload.js inside app.asar...");
-    const replacements = {
-        "index.js": fs.readFileSync(path.join(PATCHES_DIR, "index.js")),
-        "steam.js": fs.readFileSync(path.join(PATCHES_DIR, "steam.js")),
-        "preload.js": fs.readFileSync(path.join(PATCHES_DIR, "preload.js")),
-    };
-    patchAsarArchive(BACKUP_ASAR_PATH, ASAR_PATH, replacements);
+    console.log("[2/3] Dynamically patching index.js, steam.js, and preload.js inside app.asar...");
+    patchAsarArchive(BACKUP_ASAR_PATH, ASAR_PATH);
     console.log("      Successfully updated:", ASAR_PATH);
 
     // 3. Install steam_multiplayer.js into %APPDATA%\shapez.io\mods
@@ -115,6 +201,10 @@ if (require.main === module) {
 
 module.exports = {
     patchAsarArchive,
+    patchIndexJs,
+    patchPreloadJs,
+    patchSteamJs,
+    readAsarFile,
     ASAR_PATH,
     BACKUP_ASAR_PATH,
     TARGET_MOD_FILE,

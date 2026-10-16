@@ -22,7 +22,7 @@ By default, Chromium and Electron prevent multiple instances from using the same
 shapezio.exe --multi-instance --instance-id=2 --dev
 ```
 
-When `src/asar-patches/index.js` detects these switches:
+When the patched `index.js` in `app.asar` detects these switches:
 * **UserData Directory**: Relocated to `%APPDATA%\shapez.io\instances\instance-2`.
 * **Save Directory**: Relocated to `%APPDATA%\shapez.io\saves-2`.
 * **Single Instance Lock**: `app.requestSingleInstanceLock()` is bypassed, allowing both windows to run concurrently without file locking conflicts.

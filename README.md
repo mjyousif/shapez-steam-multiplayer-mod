@@ -147,18 +147,14 @@ Full architectural and feature design documentation is available in the [`docs/`
 │   ├── technical-design/       # Architecture, networking protocol, and sync engine
 │   └── features/               # Steamworks, Co-op HUD, testing, and troubleshooting
 ├── scripts/
-│   ├── install-mod.js          # Automated backup, ASAR patcher, and mod installer
+│   ├── install-mod.js          # Automated backup, in-place ASAR patcher, and mod installer
 │   ├── uninstall-mod.js        # Restores vanilla app.asar and removes mod
 │   ├── verify-mod.js           # Automated verification & Host<->Client test suite
 │   ├── build-dist.js           # Packages distribution release and installer
 │   └── launch-coop-client.js   # Spawns a second local game instance (--multi-instance)
 └── src/
     ├── steam_multiplayer.js    # The shapez.io Co-op Multiplayer mod (Renderer)
-    ├── asar-patches/           # Patched Electron main-process files injected into app.asar
-    │   ├── index.js            # Enables Steam with mods & adds --multi-instance support
-    │   ├── steam.js            # Greenworks Lobby/Friends/RichPresence IPC + TCP framing server
-    │   └── preload.js          # Renderer IPC bridge with listener cleanup
-    ├── installer/              # Standalone C# Windows installer GUI
-    └── vanilla/                # Reference copies of the unmodified vanilla files
+    ├── steam_bridge.js         # Greenworks Steamworks IPC, TCP framing server & bridge
+    └── installer/              # Standalone C# Windows installer GUI
 ```
 

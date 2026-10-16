@@ -38,7 +38,7 @@ flowchart LR
 
 ## 2. Transport Layer Details
 
-### 2.1 Direct TCP Framing Layer (`src/asar-patches/steam.js`)
+### 2.1 Direct TCP Framing Layer (`src/steam_bridge.js`)
 
 Node.js TCP sockets (`net.Socket`) transmit arbitrary byte streams rather than discrete message packets. Without framing, multiple JSON packets can be merged into a single `data` event, or a large JSON packet can be fragmented across multiple read buffers.
 

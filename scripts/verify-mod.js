@@ -19,6 +19,7 @@ async function verifyAsarIntegrity() {
     assert(header.files["index.js"], "index.js must exist in ASAR header");
     assert(header.files["steam.js"], "steam.js must exist in ASAR header");
     assert(header.files["preload.js"], "preload.js must exist in ASAR header");
+    assert(header.files["steam_bridge.js"], "steam_bridge.js must exist in ASAR header");
     assert(header.files["bundle.js"], "bundle.js must exist in ASAR header");
     assert(
         header.files.node_modules.files["shapez.io-private-artifacts"].files.steam.files.lib.files.win64.unpacked ===
@@ -36,11 +37,13 @@ async function verifyAsarIntegrity() {
     const indexContent = readAsarEntry("index.js");
     const steamContent = readAsarEntry("steam.js");
     const preloadContent = readAsarEntry("preload.js");
+    const bridgeContent = readAsarEntry("steam_bridge.js");
 
     assert(indexContent.includes("steam.init(isDev, allowMultiInstance);"), "index.js should call steam.init with allowMultiInstance");
     assert(indexContent.includes("steam.listen();") && !indexContent.includes("if (mods.length === 0)"), "index.js should always call steam.listen()");
-    assert(steamContent.includes("steam:mp:create-lobby"), "steam.js should register steam:mp:create-lobby");
-    assert(steamContent.includes("mp:net:host-start"), "steam.js should register mp:net:host-start");
+    assert(steamContent.includes("steam_bridge") || steamContent.includes("steam:mp:create-lobby"), "steam.js should reference steam_bridge or mp");
+    assert(bridgeContent.includes("steam:mp:create-lobby"), "steam_bridge.js should register steam:mp:create-lobby");
+    assert(bridgeContent.includes("mp:net:host-start"), "steam_bridge.js should register mp:net:host-start");
     assert(preloadContent.includes("removeListener"), "preload.js should support listener cleanup");
 
     console.log("   [PASS] app.asar header, offsets, and unpacked native Steam bindings verified.");
@@ -113,7 +116,7 @@ async function verifyMainProcessAndModEndToEnd() {
             return origLoad.apply(this, arguments);
         };
 
-        const steamPath = path.resolve(__dirname, "..", "src", "asar-patches", "steam.js");
+        const steamPath = path.resolve(__dirname, "..", "src", "steam_bridge.js");
         delete require.cache[steamPath];
         const steamModule = require(steamPath);
         Module._load = origLoad;

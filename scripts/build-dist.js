@@ -5,7 +5,8 @@ const { execSync } = require("child_process");
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
 const SRC_DIR = path.join(ROOT_DIR, "src");
-const PATCHES_DIR = path.join(SRC_DIR, "asar-patches");
+const BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
+const MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
 
 function findCsc() {
     const candidates = [
@@ -38,10 +39,8 @@ function main() {
     const outputExe = path.join(DIST_DIR, "ShapezCoopInstaller.exe");
 
     const resources = [
-        `"/resource:${path.join(PATCHES_DIR, "index.js")},index.js"`,
-        `"/resource:${path.join(PATCHES_DIR, "steam.js")},steam.js"`,
-        `"/resource:${path.join(PATCHES_DIR, "preload.js")},preload.js"`,
-        `"/resource:${path.join(SRC_DIR, "steam_multiplayer.js")},steam_multiplayer.js"`,
+        `"/resource:${BRIDGE_FILE},steam_bridge.js"`,
+        `"/resource:${MOD_FILE},steam_multiplayer.js"`,
     ];
 
     const refs = [

@@ -73,8 +73,7 @@ shapez-steam-multiplayer-mod/
 │   └── launch-coop-client.js   # Isolated secondary instance launcher
 ├── src/
 │   ├── steam_multiplayer.js    # In-game client mod (Renderer process)
-│   ├── asar-patches/           # Electron Main-process patches (index.js, steam.js, preload.js)
-│   ├── installer/              # C# WinForms standalone installer source (Program.cs)
-│   └── vanilla/                # Clean reference copies of unmodified game files
+│   ├── steam_bridge.js         # Electron Main-process Steam & TCP IPC bridge
+│   └── installer/              # C# WinForms standalone installer source (Program.cs)
 └── package.json
 ```

@@ -260,6 +260,90 @@ namespace ShapezCoopInstaller
             }
         }
 
+        private static byte[] ExtractAsarFile(byte[] rawAsar, Dictionary<string, object> headerObj, uint headerSize, string fileName)
+        {
+            var files = headerObj["files"] as Dictionary<string, object>;
+            if (files == null || !files.ContainsKey(fileName)) return null;
+            var entry = files[fileName] as Dictionary<string, object>;
+            if (entry == null || !entry.ContainsKey("offset") || !entry.ContainsKey("size")) return null;
+            long offset = Convert.ToInt64(entry["offset"]);
+            long size = Convert.ToInt64(entry["size"]);
+            long payloadStart = 8 + headerSize;
+            byte[] result = new byte[size];
+            Buffer.BlockCopy(rawAsar, (int)(payloadStart + offset), result, 0, (int)size);
+            return result;
+        }
+
+        private static string PatchIndexJs(string src)
+        {
+            string outStr = src;
+            if (!outStr.Contains("allowMultiInstance"))
+            {
+                outStr = Regex.Replace(
+                    outStr,
+                    @"const\s+externalMod\s*=\s*app\.commandLine\.getSwitchValue\(""load-mod""\);",
+                    "const allowMultiInstance = app.commandLine.hasSwitch(\"multi-instance\");\nconst externalMod = app.commandLine.getSwitchValue(\"load-mod\");\nconst instanceId = app.commandLine.getSwitchValue(\"instance-id\") || (allowMultiInstance ? String(process.pid) : \"\");\n\nif (allowMultiInstance && instanceId) {\n    const customUserData = path.join(roamingFolder, \"shapez.io\", \"instances\", \"instance-\" + instanceId);\n    fs.mkdirSync(customUserData, { recursive: true });\n    app.setPath(\"userData\", customUserData);\n}"
+                );
+                outStr = Regex.Replace(
+                    outStr,
+                    @"let\s+storePath\s*=\s*path\.join\(roamingFolder,\s*""shapez\.io"",\s*""saves""\);",
+                    "let storePath =\n    allowMultiInstance && instanceId\n        ? path.join(roamingFolder, \"shapez.io\", \"saves-\" + instanceId)\n        : path.join(roamingFolder, \"shapez.io\", \"saves\");"
+                );
+                outStr = Regex.Replace(
+                    outStr,
+                    @"title:\s*""shapez"",",
+                    "title: allowMultiInstance ? \"shapez (Co-op Instance)\" : \"shapez\","
+                );
+                outStr = Regex.Replace(
+                    outStr,
+                    @"mainWindowState\.manage\(win\);",
+                    "steam.setMainWindow(win);\n\n    if (!allowMultiInstance) {\n        mainWindowState.manage(win);\n    }"
+                );
+                outStr = Regex.Replace(
+                    outStr,
+                    @"win\.on\(""closed"",\s*\(\)\s*=>\s*\{[\r\n\s]*console\.log\(""Window closed""\);[\r\n\s]*win\s*=\s*null;[\r\n\s]*\}\);",
+                    "win.on(\"closed\", () => {\n        console.log(\"Window closed\");\n        steam.setMainWindow(null);\n        win = null;\n    });"
+                );
+                outStr = Regex.Replace(
+                    outStr,
+                    @"if\s*\(!app\.requestSingleInstanceLock\(\)\)\s*\{[\r\n\s]*app\.exit\(0\);[\r\n\s]*\}\s*else\s*\{",
+                    "if (!allowMultiInstance && !app.requestSingleInstanceLock()) {\n    app.exit(0);\n} else if (!allowMultiInstance) {"
+                );
+            }
+
+            outStr = Regex.Replace(
+                outStr,
+                @"steam\.init\(isDev\);[\s\S]*?if\s*\(mods\.length\s*===\s*0\)\s*\{\s*steam\.listen\(\);\s*\}",
+                "steam.init(isDev, allowMultiInstance);\nsteam.listen();"
+            );
+
+            return outStr;
+        }
+
+        private static string PatchPreloadJs(string src)
+        {
+            string outStr = src;
+            if (!outStr.Contains("removeListener"))
+            {
+                outStr = Regex.Replace(
+                    outStr,
+                    @"on:\s*ipcRenderer\.on\.bind\(ipcRenderer\),?",
+                    "on: (channel, listener) => {\n        const wrapped = (event, ...args) => listener(event, ...args);\n        ipcRenderer.on(channel, wrapped);\n        return () => ipcRenderer.removeListener(channel, wrapped);\n    },"
+                );
+            }
+            return outStr;
+        }
+
+        private static string PatchSteamJs(string src)
+        {
+            string outStr = src;
+            if (!outStr.Contains("steam_bridge"))
+            {
+                outStr += "\n// Hook shapez-steam-multiplayer-mod bridge\ntry {\n    const _steamBridge = require(\"./steam_bridge\");\n    module.exports = _steamBridge;\n} catch (err) {\n    console.warn(\"Failed to load steam_bridge:\", err);\n}\n";
+            }
+            return outStr;
+        }
+
         public static void PatchAsar(string sourceAsarPath, string targetAsarPath, Dictionary<string, byte[]> replacements)
         {
             byte[] rawAsar = File.ReadAllBytes(sourceAsarPath);
@@ -358,12 +442,35 @@ namespace ShapezCoopInstaller
             }
 
             // 2. Patch ASAR
-            log("Patching Steamworks/Lobby IPC bridge into app.asar...");
+            log("Dynamically patching Steamworks/Lobby IPC bridge into app.asar...");
+            byte[] rawAsar = File.ReadAllBytes(backupPath);
+            uint headerSize = BitConverter.ToUInt32(rawAsar, 4);
+            uint jsonByteLength = BitConverter.ToUInt32(rawAsar, 12);
+            string headerJsonStr = Encoding.UTF8.GetString(rawAsar, 16, (int)jsonByteLength);
+            var serializer = new JavaScriptSerializer();
+            serializer.MaxJsonLength = int.MaxValue;
+            var headerObj = serializer.Deserialize<Dictionary<string, object>>(headerJsonStr);
+
+            byte[] idxBytes = ExtractAsarFile(rawAsar, headerObj, headerSize, "index.js");
+            byte[] prlBytes = ExtractAsarFile(rawAsar, headerObj, headerSize, "preload.js");
+            byte[] stmBytes = ExtractAsarFile(rawAsar, headerObj, headerSize, "steam.js");
+
+            if (idxBytes == null || prlBytes == null || stmBytes == null)
+            {
+                throw new Exception("Source app.asar does not contain required files (index.js, preload.js, steam.js).");
+            }
+
+            string patchedIndex = PatchIndexJs(Encoding.UTF8.GetString(idxBytes));
+            string patchedPreload = PatchPreloadJs(Encoding.UTF8.GetString(prlBytes));
+            string patchedSteam = PatchSteamJs(Encoding.UTF8.GetString(stmBytes));
+            byte[] bridgeBytes = GetEmbeddedFile("steam_bridge.js");
+
             var replacements = new Dictionary<string, byte[]>
             {
-                { "index.js", GetEmbeddedFile("index.js") },
-                { "steam.js", GetEmbeddedFile("steam.js") },
-                { "preload.js", GetEmbeddedFile("preload.js") }
+                { "index.js", Encoding.UTF8.GetBytes(patchedIndex) },
+                { "preload.js", Encoding.UTF8.GetBytes(patchedPreload) },
+                { "steam.js", Encoding.UTF8.GetBytes(patchedSteam) },
+                { "steam_bridge.js", bridgeBytes }
             };
 
             // Temporary file to avoid corruption if interrupted
