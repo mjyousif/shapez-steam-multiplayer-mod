@@ -329,9 +329,22 @@ class Mod extends shapez.Mod {
             }
         });
 
+        // Hook MainMenuState to guarantee the multiplayer button persists across menu re-renders & savegame updates
+        if (typeof shapez !== "undefined" && shapez.MainMenuState) {
+            const self = this;
+            this.modInterface.runAfterMethod(shapez.MainMenuState, "renderMainMenu", function () {
+                self.enhanceMainMenu(this);
+            });
+            this.modInterface.runAfterMethod(shapez.MainMenuState, "onEnter", function () {
+                self.enhanceMainMenu(this);
+            });
+        }
+
         this.signals.stateEntered.add(state => {
             if (state && state.key === "MainMenuState") {
+                this.enhanceMainMenu(state);
                 setTimeout(() => this.enhanceMainMenu(state), 40);
+                setTimeout(() => this.enhanceMainMenu(state), 200);
             }
         });
     }
@@ -341,10 +354,14 @@ class Mod extends shapez.Mod {
     // =========================================================================
 
     async refreshSteamStatus() {
-        if (typeof ipcRenderer === "undefined") return;
+        if (typeof ipcRenderer === "undefined") {
+            this.bridgeAvailable = false;
+            return;
+        }
         try {
             const status = await ipcRenderer.invoke("steam:mp:get-status");
             if (status) {
+                this.bridgeAvailable = true;
                 this.steamStatus = status;
                 console.log("[Steam MP] Loaded Steam Status:", status);
                 this.updateMainMenuBadge();
@@ -362,7 +379,9 @@ class Mod extends shapez.Mod {
                 }
             }
         } catch (err) {
-            console.warn("[Steam MP] Could not query steam:mp:get-status:", err);
+            this.bridgeAvailable = false;
+            console.warn("[Steam MP] Could not query steam:mp:get-status (Bridge may not be installed):", err);
+            this.updateMainMenuBadge();
         }
     }
 
@@ -2038,22 +2057,45 @@ class Mod extends shapez.Mod {
     // =========================================================================
 
     enhanceMainMenu(mainMenuState) {
-        const htmlEl = mainMenuState.htmlElement;
+        const htmlEl = (mainMenuState && mainMenuState.htmlElement) || document.getElementById("state_MainMenuState");
         if (!htmlEl) return;
+
+        // If multi-instance is active, ensure document title reflects it
+        if (this.steamStatus?.allowMultiInstance || (typeof window !== "undefined" && window.location.search.includes("multi-instance"))) {
+            document.title = "shapez (Co-op Instance)";
+        }
 
         // Add "Steam Multiplayer" button to main menu button bar
         const buttonsContainer = htmlEl.querySelector(".mainContainer .buttons");
-        if (buttonsContainer && !buttonsContainer.querySelector(".mpMainMenuBtn")) {
-            const mpBtn = document.createElement("button");
-            mpBtn.className = "styledButton mpMainMenuBtn";
-            mpBtn.innerHTML = `<span class="mpSteamDot"></span> Steam Multiplayer`;
-            mpBtn.addEventListener("click", () => this.openMultiplayerModal(mainMenuState));
-            buttonsContainer.insertBefore(mpBtn, buttonsContainer.firstChild);
+        if (buttonsContainer) {
+            if (!buttonsContainer.querySelector(".mpMainMenuBtn")) {
+                const mpBtn = document.createElement("button");
+                mpBtn.className = "styledButton mpMainMenuBtn";
+                mpBtn.innerHTML = `<span class="mpSteamDot"></span> Steam Multiplayer`;
+                mpBtn.addEventListener("click", () => this.openMultiplayerModal(mainMenuState));
+                buttonsContainer.insertBefore(mpBtn, buttonsContainer.firstChild);
+            }
+
+            // Continuous guard against removeAllChildren wipes during async save loads
+            if (!buttonsContainer.__mpObserver) {
+                const observer = new MutationObserver(() => {
+                    if (buttonsContainer && !buttonsContainer.querySelector(".mpMainMenuBtn")) {
+                        const mpBtn = document.createElement("button");
+                        mpBtn.className = "styledButton mpMainMenuBtn";
+                        mpBtn.innerHTML = `<span class="mpSteamDot"></span> Steam Multiplayer`;
+                        mpBtn.addEventListener("click", () => this.openMultiplayerModal(mainMenuState));
+                        buttonsContainer.insertBefore(mpBtn, buttonsContainer.firstChild);
+                        this.updateMainMenuBadge();
+                    }
+                });
+                observer.observe(buttonsContainer, { childList: true });
+                buttonsContainer.__mpObserver = observer;
+            }
         }
 
         // Also add a "Co-op" quick-host button on each savegame row if present
         const saveItems = htmlEl.querySelectorAll(".savegames .savegame");
-        const savesMeta = this.app.savegameMgr.getSavegamesMetaData() || [];
+        const savesMeta = this.app?.savegameMgr?.getSavegamesMetaData() || [];
         saveItems.forEach((row, idx) => {
             if (row.querySelector(".mpHostSaveBtn") || !savesMeta[idx]) return;
             const meta = savesMeta[idx];
@@ -2075,7 +2117,13 @@ class Mod extends shapez.Mod {
     updateMainMenuBadge() {
         const dot = document.querySelector(".mpMainMenuBtn .mpSteamDot");
         if (dot) {
-            dot.classList.toggle("online", Boolean(this.steamStatus?.initialized));
+            dot.classList.remove("online", "warning");
+            if (this.steamStatus?.initialized) {
+                dot.classList.add("online");
+            } else if (this.bridgeAvailable === false) {
+                dot.classList.add("warning");
+                dot.title = "Steamworks bridge unpatched. Run ShapezCoopInstaller.exe to patch app.asar";
+            }
         }
     }
 
@@ -2084,9 +2132,10 @@ class Mod extends shapez.Mod {
         await this.refreshSteamStatus();
 
         const profile = this.steamStatus?.profile || { name: "Player", steamId: "local", isSteam: false };
-        const friends = (await ipcRenderer.invoke("steam:mp:get-friends").catch(() => [])) || [];
+        const friends = (typeof ipcRenderer !== "undefined" && (await ipcRenderer.invoke("steam:mp:get-friends").catch(() => []))) || [];
         const savesMeta = this.app?.savegameMgr?.getSavegamesMetaData() || [];
         const active = this.isSessionActive();
+        const bridgeMissing = this.bridgeAvailable === false;
 
         const overlay = document.createElement("div");
         overlay.className = "mpModalBackdrop";
@@ -2104,6 +2153,11 @@ class Mod extends shapez.Mod {
                     </div>
                     <button class="mpCloseModalBtn" aria-label="Close">&times;</button>
                 </div>
+                ${bridgeMissing ? `
+                <div class="mpBridgeWarning">
+                    <strong>Steamworks Bridge Unpatched:</strong> The core game archive (<code>resources\\app.asar</code>) has not been patched. Steam lobbies, invites, and multi-instance sync require running <strong>ShapezCoopInstaller.exe</strong> with shapez closed.
+                </div>
+                ` : ""}
 
                 ${
                     active
@@ -2406,6 +2460,23 @@ class Mod extends shapez.Mod {
             .mpSteamDot.online {
                 background: #4ade80;
                 box-shadow: 0 0 8px #4ade80;
+            }
+            .mpSteamDot.warning {
+                background: #f59e0b;
+                box-shadow: 0 0 8px #f59e0b;
+            }
+            .mpBridgeWarning {
+                background: rgba(239, 68, 68, 0.12);
+                border: 1px solid rgba(239, 68, 68, 0.4);
+                border-radius: 8px;
+                padding: 10px 14px;
+                margin-bottom: 14px;
+                color: #fca5a5;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            .mpBridgeWarning strong {
+                color: #ef4444;
             }
             .mpHostSaveBtn {
                 background: #1e3a8a !important;

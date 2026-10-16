@@ -13,8 +13,36 @@ using Microsoft.Win32;
 
 namespace ShapezCoopInstaller
 {
+    public enum InstallStatus
+    {
+        InvalidDirectory,
+        FullyInstalled,
+        PartialModOnly,   // steam_multiplayer.js in AppData, but app.asar is unpatched
+        PartialAsarOnly,  // app.asar is patched, but steam_multiplayer.js is missing
+        Vanilla
+    }
+
     public class InstallerLogic
     {
+        public static bool IsShapezRunning()
+        {
+            try
+            {
+                Process[] procs = Process.GetProcesses();
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        string name = p.ProcessName.ToLowerInvariant();
+                        if (name == "shapezio" || name == "shapez") return true;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return false;
+        }
+
         public static string FindShapezDirectory()
         {
             var candidates = new List<string>();
@@ -188,12 +216,10 @@ namespace ShapezCoopInstaller
             throw new Exception("Embedded resource not found: " + resourceName);
         }
 
-        public static bool IsModInstalled(string shapezDir)
+        public static bool IsAsarPatched(string shapezDir)
         {
             string asarPath = Path.Combine(shapezDir, @"resources\app.asar");
-            string modFile = GetModFilePath();
-
-            if (!File.Exists(modFile) || !File.Exists(asarPath))
+            if (!File.Exists(asarPath))
                 return false;
 
             try
@@ -237,6 +263,25 @@ namespace ShapezCoopInstaller
             catch { }
 
             return false;
+        }
+
+        public static InstallStatus GetInstallStatus(string shapezDir)
+        {
+            if (!IsValidShapezDir(shapezDir))
+                return InstallStatus.InvalidDirectory;
+
+            bool asarPatched = IsAsarPatched(shapezDir);
+            bool modFileExists = File.Exists(GetModFilePath());
+
+            if (asarPatched && modFileExists) return InstallStatus.FullyInstalled;
+            if (!asarPatched && modFileExists) return InstallStatus.PartialModOnly;
+            if (asarPatched && !modFileExists) return InstallStatus.PartialAsarOnly;
+            return InstallStatus.Vanilla;
+        }
+
+        public static bool IsModInstalled(string shapezDir)
+        {
+            return GetInstallStatus(shapezDir) == InstallStatus.FullyInstalled;
         }
 
         private static Dictionary<string, object> ComputeIntegrity(byte[] buffer)
@@ -297,7 +342,7 @@ namespace ShapezCoopInstaller
                 outStr = Regex.Replace(
                     outStr,
                     @"mainWindowState\.manage\(win\);",
-                    "steam.setMainWindow(win);\n\n    if (!allowMultiInstance) {\n        mainWindowState.manage(win);\n    }"
+                    "steam.setMainWindow(win);\n\n    if (!allowMultiInstance) {\n        mainWindowState.manage(win);\n    } else {\n        const instTitle = \"shapez (Co-op Instance\" + (instanceId ? \" \" + instanceId : \"\") + \")\";\n        win.setTitle(instTitle);\n        win.on(\"page-title-updated\", (ev) => { ev.preventDefault(); win.setTitle(instTitle); });\n    }"
                 );
                 outStr = Regex.Replace(
                     outStr,
@@ -686,31 +731,49 @@ namespace ShapezCoopInstaller
         private void RefreshStatus()
         {
             string path = txtPath.Text.Trim();
-            if (!InstallerLogic.IsValidShapezDir(path))
+            var status = InstallerLogic.GetInstallStatus(path);
+            switch (status)
             {
-                lblStatus.Text = "Status: shapez.io not found at this folder. Please click Browse.";
-                lblStatus.ForeColor = Color.FromArgb(180, 40, 40);
-                btnInstall.Enabled = false;
-                btnUninstall.Enabled = false;
-                return;
-            }
+                case InstallStatus.InvalidDirectory:
+                    lblStatus.Text = "Status: shapez.io not found at this folder. Please click Browse.";
+                    lblStatus.ForeColor = Color.FromArgb(180, 40, 40);
+                    btnInstall.Enabled = false;
+                    btnUninstall.Enabled = false;
+                    break;
 
-            bool installed = InstallerLogic.IsModInstalled(path);
-            if (installed)
-            {
-                lblStatus.Text = "Status: Co-op Multiplayer Mod is currently installed! (v1.0.0)";
-                lblStatus.ForeColor = Color.FromArgb(30, 130, 60);
-                btnInstall.Text = "Reinstall / Update";
-            }
-            else
-            {
-                lblStatus.Text = "Status: Ready to install. Game is currently unpatched (Vanilla).";
-                lblStatus.ForeColor = Color.FromArgb(20, 80, 160);
-                btnInstall.Text = "Install Mod";
-            }
+                case InstallStatus.FullyInstalled:
+                    lblStatus.Text = "Status: Steam Co-op Multiplayer Mod is currently installed! (v1.0.0)";
+                    lblStatus.ForeColor = Color.FromArgb(30, 130, 60);
+                    btnInstall.Text = "Reinstall / Update";
+                    btnInstall.Enabled = true;
+                    btnUninstall.Enabled = true;
+                    break;
 
-            btnInstall.Enabled = true;
-            btnUninstall.Enabled = true;
+                case InstallStatus.PartialModOnly:
+                    lblStatus.Text = "Status: Incomplete install — Mod UI found in %APPDATA%, but app.asar is unpatched.";
+                    lblStatus.ForeColor = Color.FromArgb(204, 102, 0);
+                    btnInstall.Text = "Complete Installation";
+                    btnInstall.Enabled = true;
+                    btnUninstall.Enabled = true;
+                    break;
+
+                case InstallStatus.PartialAsarOnly:
+                    lblStatus.Text = "Status: Incomplete install — app.asar is patched, but steam_multiplayer.js is missing.";
+                    lblStatus.ForeColor = Color.FromArgb(204, 102, 0);
+                    btnInstall.Text = "Deploy Mod File";
+                    btnInstall.Enabled = true;
+                    btnUninstall.Enabled = true;
+                    break;
+
+                case InstallStatus.Vanilla:
+                default:
+                    lblStatus.Text = "Status: Ready to install. Game is currently unpatched (Vanilla).";
+                    lblStatus.ForeColor = Color.FromArgb(20, 80, 160);
+                    btnInstall.Text = "Install Mod";
+                    btnInstall.Enabled = true;
+                    btnUninstall.Enabled = true;
+                    break;
+            }
         }
 
         private void BtnBrowse_Click(object sender, EventArgs e)
@@ -730,6 +793,24 @@ namespace ShapezCoopInstaller
         private void BtnInstall_Click(object sender, EventArgs e)
         {
             string path = txtPath.Text.Trim();
+
+            if (InstallerLogic.IsShapezRunning())
+            {
+                var prompt = MessageBox.Show(
+                    "shapez.io is currently running!\n\nPlease close the game so the installer can patch game files without file lock conflicts.\n\nClick OK once shapez.io is closed to proceed, or Cancel to abort.",
+                    "shapez.io Running",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Warning);
+
+                if (prompt != DialogResult.OK) return;
+
+                if (InstallerLogic.IsShapezRunning())
+                {
+                    MessageBox.Show("shapez.io is still running. Installation cancelled.", "Cancelled", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+            }
+
             txtLog.Clear();
             AppendLog("=== Starting Installation ===");
 
@@ -765,6 +846,24 @@ namespace ShapezCoopInstaller
         private void BtnUninstall_Click(object sender, EventArgs e)
         {
             string path = txtPath.Text.Trim();
+
+            if (InstallerLogic.IsShapezRunning())
+            {
+                var prompt = MessageBox.Show(
+                    "shapez.io is currently running!\n\nPlease close the game before restoring vanilla so game files can be replaced without file lock conflicts.\n\nClick OK once shapez.io is closed to proceed, or Cancel to abort.",
+                    "shapez.io Running",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Warning);
+
+                if (prompt != DialogResult.OK) return;
+
+                if (InstallerLogic.IsShapezRunning())
+                {
+                    MessageBox.Show("shapez.io is still running. Restore cancelled.", "Cancelled", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+            }
+
             txtLog.Clear();
             AppendLog("=== Restoring Vanilla Game ===");
 
@@ -860,6 +959,19 @@ namespace ShapezCoopInstaller
                 AttachConsole(ATTACH_PARENT_PROCESS);
                 Console.WriteLine("\n[shapez.io Co-op Installer] Running in silent mode...");
                 string path = !string.IsNullOrEmpty(customPath) ? customPath : InstallerLogic.FindShapezDirectory();
+
+                if (!InstallerLogic.IsValidShapezDir(path))
+                {
+                    Console.WriteLine("[ERROR] Could not find valid shapez.io directory at: " + path);
+                    return 1;
+                }
+
+                if (InstallerLogic.IsShapezRunning())
+                {
+                    Console.WriteLine("[ERROR] shapez.io is currently running. Please close the game first.");
+                    return 2;
+                }
+
                 try
                 {
                     if (isUninstall)
