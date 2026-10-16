@@ -49,6 +49,10 @@ function main() {
         "/r:System.Web.Extensions.dll",
     ];
 
+    try {
+        execSync("taskkill /F /IM ShapezCoopInstaller.exe", { stdio: "ignore" });
+    } catch {}
+
     const cmd = `"${cscPath}" /target:winexe /optimize+ /out:"${outputExe}" ${refs.join(" ")} ${resources.join(" ")} "${installerCs}"`;
 
     console.log("Compiling standalone GUI & CLI installer...");

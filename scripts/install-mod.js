@@ -55,7 +55,7 @@ function patchIndexJs(src) {
         );
         out = out.replace(
             /mainWindowState\.manage\(win\);/,
-            `steam.setMainWindow(win);\n\n    if (!allowMultiInstance) {\n        mainWindowState.manage(win);\n    }`
+            `steam.setMainWindow(win);\n\n    if (!allowMultiInstance) {\n        mainWindowState.manage(win);\n    } else {\n        const instTitle = "shapez (Co-op Instance" + (instanceId ? " " + instanceId : "") + ")";\n        win.setTitle(instTitle);\n        win.on("page-title-updated", (ev) => { ev.preventDefault(); win.setTitle(instTitle); });\n    }`
         );
         out = out.replace(
             /win\.on\("closed",\s*\(\)\s*=>\s*\{[\r\n\s]*console\.log\("Window closed"\);[\r\n\s]*win\s*=\s*null;[\r\n\s]*\}\);/,

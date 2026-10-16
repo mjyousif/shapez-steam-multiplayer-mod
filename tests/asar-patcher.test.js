@@ -155,5 +155,22 @@ if (mods.length === 0) {
         );
         assert(patched.includes("customUserData = path.join(roamingFolder"), "customUserData must be configured");
     });
+
+    test("patchIndexJs sets instance window title and prevents page-title-updated override", () => {
+        const mockVanillaIndex = `
+const externalMod = app.commandLine.getSwitchValue("load-mod");
+const roamingFolder = process.env.APPDATA;
+let storePath = path.join(roamingFolder, "shapez.io", "saves");
+title: "shapez",
+mainWindowState.manage(win);
+win.on("closed", () => { console.log("Window closed"); win = null; });
+if (!app.requestSingleInstanceLock()) { app.exit(0); } else {
+steam.init(isDev);
+if (mods.length === 0) { steam.listen(); }
+`;
+        const patched = patchIndexJs(mockVanillaIndex);
+        assert(patched.includes("page-title-updated"), "Must handle page-title-updated");
+        assert(patched.includes("instTitle"), "Must set instTitle on multi-instance");
+    });
 });
 
