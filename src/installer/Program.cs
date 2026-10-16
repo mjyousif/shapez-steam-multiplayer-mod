@@ -19,7 +19,48 @@ namespace ShapezCoopInstaller
         {
             var candidates = new List<string>();
 
-            // 1. Registry checks
+            // 1. Direct Steam App Uninstall Registry Key (App ID 1318690 = shapez)
+            string[] uninstallKeys = {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 1318690",
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Steam App 1318690"
+            };
+
+            foreach (var keyPath in uninstallKeys)
+            {
+                try
+                {
+                    using (var key = Registry.LocalMachine.OpenSubKey(keyPath))
+                    {
+                        if (key != null)
+                        {
+                            var loc = key.GetValue("InstallLocation") as string;
+                            if (!string.IsNullOrEmpty(loc) && IsValidShapezDir(loc))
+                            {
+                                return loc;
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+                    {
+                        if (key != null)
+                        {
+                            var loc = key.GetValue("InstallLocation") as string;
+                            if (!string.IsNullOrEmpty(loc) && IsValidShapezDir(loc))
+                            {
+                                return loc;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 2. Steam Root Registry checks
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam"))
