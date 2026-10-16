@@ -124,21 +124,41 @@ You can test Hosting and Joining on the same computer using two side-by-side win
 
 ---
 
+## Documentation
+
+Full architectural and feature design documentation is available in the [`docs/`](docs/README.md) directory:
+
+- 🏗️ [**Architecture & Process Model**](docs/technical-design/architecture.md): Electron Main vs. Renderer split, ASAR binary patching, and IPC bridge.
+- 🌐 [**Networking Protocol & Transports**](docs/technical-design/networking-protocol.md): Dual-transport TCP sockets & WebRTC DataChannels, framing format, and chunked transfers.
+- ⚡ [**Synchronization Engine**](docs/technical-design/synchronization-engine.md): GameLogic interception, delta action replay, and loop recursion guards.
+- 👥 [**Steamworks Integration**](docs/features/steam-integration.md): Steam Lobbies, Friends presence, Overlay invites, and Rich Presence.
+- 🖥️ [**Co-op HUD & Social Features**](docs/features/coop-hud-and-social.md): Live cursor streaming, ghost building placement previews, off-screen arrows, radar pings, and chat.
+- 🧪 [**Testing & Troubleshooting**](docs/features/testing-and-troubleshooting.md): Multi-instance single-PC testing, automated verification suite, and common fixes.
+
+---
+
 ## Project Structure
 
 ```text
 ├── package.json
 ├── README.md
+├── docs/                       # Technical design and feature documentation
+│   ├── README.md               # Documentation hub and index
+│   ├── technical-design/       # Architecture, networking protocol, and sync engine
+│   └── features/               # Steamworks, Co-op HUD, testing, and troubleshooting
 ├── scripts/
 │   ├── install-mod.js          # Automated backup, ASAR patcher, and mod installer
 │   ├── uninstall-mod.js        # Restores vanilla app.asar and removes mod
 │   ├── verify-mod.js           # Automated verification & Host<->Client test suite
+│   ├── build-dist.js           # Packages distribution release and installer
 │   └── launch-coop-client.js   # Spawns a second local game instance (--multi-instance)
 └── src/
-    ├── steam_multiplayer.js    # The shapez.io Co-op Multiplayer mod
+    ├── steam_multiplayer.js    # The shapez.io Co-op Multiplayer mod (Renderer)
     ├── asar-patches/           # Patched Electron main-process files injected into app.asar
     │   ├── index.js            # Enables Steam with mods & adds --multi-instance support
     │   ├── steam.js            # Greenworks Lobby/Friends/RichPresence IPC + TCP framing server
     │   └── preload.js          # Renderer IPC bridge with listener cleanup
+    ├── installer/              # Standalone C# Windows installer GUI
     └── vanilla/                # Reference copies of the unmodified vanilla files
 ```
+
