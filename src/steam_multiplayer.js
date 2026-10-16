@@ -120,12 +120,51 @@ class HUDMultiplayer extends shapez.BaseHUDPart {
         }
 
         const collapseBtn = this.container.querySelector(".mpCollapseBtn");
+        const header = this.container.querySelector(".mpHudHeader");
         const inviteBtn = this.container.querySelector(".mpBtnInvite");
         const copyBtn = this.container.querySelector(".mpBtnCopyCode");
         const pingBtn = this.container.querySelector(".mpBtnPing");
         const resyncBtn = this.container.querySelector(".mpBtnResync");
         const chatInput = this.container.querySelector(".mpChatInput");
         const chatSendBtn = this.container.querySelector(".mpChatSendBtn");
+
+        // Allow dragging HUD panel anywhere on screen
+        if (header) {
+            let isDragging = false;
+            let startX = 0, startY = 0;
+            let startLeft = 0, startTop = 0;
+
+            header.style.cursor = "move";
+            header.addEventListener("mousedown", ev => {
+                if (ev.target === collapseBtn) return;
+                isDragging = true;
+                startX = ev.clientX;
+                startY = ev.clientY;
+                const rect = this.container.getBoundingClientRect();
+                startLeft = rect.left;
+                startTop = rect.top;
+                this.container.style.right = "auto";
+                this.container.style.bottom = "auto";
+                this.container.style.left = startLeft + "px";
+                this.container.style.top = startTop + "px";
+                this.container.style.transform = "none";
+                ev.preventDefault();
+            });
+
+            window.addEventListener("mousemove", ev => {
+                if (!isDragging) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                const newLeft = Math.max(10, Math.min(window.innerWidth - 120, startLeft + dx));
+                const newTop = Math.max(10, Math.min(window.innerHeight - 40, startTop + dy));
+                this.container.style.left = newLeft + "px";
+                this.container.style.top = newTop + "px";
+            });
+
+            window.addEventListener("mouseup", () => {
+                isDragging = false;
+            });
+        }
 
         collapseBtn.addEventListener("click", () => {
             this.collapsed = !this.collapsed;
@@ -2501,6 +2540,8 @@ class Mod extends shapez.Mod {
                 width: min(860px, 92vw);
                 max-height: 86vh;
                 overflow-y: auto;
+                overflow-x: hidden;
+                box-sizing: border-box;
                 background: #1b2838;
                 color: #e5e7eb;
                 border: 2px solid #66c0f4;
@@ -2578,8 +2619,11 @@ class Mod extends shapez.Mod {
             }
             .mpModalColumns {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
                 gap: 20px;
+                min-width: 0;
+                width: 100%;
+                box-sizing: border-box;
             }
             .mpModalCol {
                 background: rgba(15, 23, 42, 0.55);
@@ -2589,6 +2633,8 @@ class Mod extends shapez.Mod {
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
+                min-width: 0;
+                box-sizing: border-box;
             }
             .mpModalCol h3 {
                 margin: 0;
@@ -2608,23 +2654,44 @@ class Mod extends shapez.Mod {
             .mpSelectSave,
             .mpInputPort,
             .mpInputJoinCode {
-                background: #0f172a;
-                color: #f8fafc;
-                border: 1px solid #334155;
-                border-radius: 4px;
-                padding: 7px 10px;
-                font-size: 13px;
-                font-family: inherit;
+                background: #0f172a !important;
+                background-color: #0f172a !important;
+                color: #f8fafc !important;
+                border: 1px solid #334155 !important;
+                border-radius: 4px !important;
+                padding: 6px 10px !important;
+                margin: 0 !important;
+                height: 34px !important;
+                line-height: 20px !important;
+                font-size: 12px !important;
+                font-family: inherit !important;
+                display: block !important;
+                box-sizing: border-box !important;
                 user-select: text !important;
                 -webkit-user-select: text !important;
                 pointer-events: all !important;
             }
             .mpInputGroup {
-                display: flex;
-                gap: 8px;
+                display: flex !important;
+                gap: 8px !important;
+                align-items: center !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
             }
             .mpInputGroup .mpInputJoinCode {
-                flex: 1;
+                flex: 1 1 auto !important;
+                min-width: 0 !important;
+                width: auto !important;
+            }
+            .mpInputGroup .mpJoinByCodeBtn {
+                flex: 0 0 auto !important;
+                height: 34px !important;
+                line-height: 20px !important;
+                margin: 0 !important;
+                padding: 0 16px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
             }
             .mpPrimaryBtn {
                 background: #2563eb !important;
@@ -2643,6 +2710,7 @@ class Mod extends shapez.Mod {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
+                gap: 8px;
             }
             .mpFriendsList {
                 display: flex;
@@ -2691,11 +2759,10 @@ class Mod extends shapez.Mod {
             /* In-Game HUD Panel */
             #ingame_HUD_Multiplayer.mpHudPanel {
                 position: absolute;
-                top: 12px;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 310px;
-                background: rgba(17, 24, 39, 0.90);
+                top: 70px;
+                right: 16px;
+                width: 300px;
+                background: rgba(17, 24, 39, 0.94);
                 border: 1.5px solid rgba(102, 192, 244, 0.65);
                 border-radius: 7px;
                 color: #f3f4f6;
@@ -2716,6 +2783,9 @@ class Mod extends shapez.Mod {
                 border-radius: 6px 6px 0 0;
                 font-size: 12px;
                 font-weight: bold;
+                cursor: move;
+                user-select: none;
+                -webkit-user-select: none;
             }
             .mpStatusDot {
                 width: 8px;
@@ -2799,9 +2869,11 @@ class Mod extends shapez.Mod {
             .mpChatBox {
                 display: flex;
                 flex-direction: column;
-                gap: 4px;
+                gap: 6px;
                 border-top: 1px solid rgba(148, 163, 184, 0.2);
                 padding-top: 6px;
+                box-sizing: border-box;
+                width: 100%;
             }
             .mpChatMessages {
                 max-height: 75px;
@@ -2810,30 +2882,50 @@ class Mod extends shapez.Mod {
                 display: flex;
                 flex-direction: column;
                 gap: 2px;
+                word-break: break-word;
             }
             .mpChatLine.mpSystemMsg .mpSysText {
                 color: #93c5fd;
                 font-style: italic;
             }
             .mpChatInputRow {
-                display: flex;
-                gap: 4px;
+                display: flex !important;
+                gap: 6px !important;
+                align-items: center !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
             }
             .mpChatInput {
-                flex: 1;
-                background: #0f172a;
-                color: #ffffff;
-                border: 1px solid #334155;
-                border-radius: 4px;
-                padding: 3px 6px;
-                font-size: 11px;
+                flex: 1 1 auto !important;
+                min-width: 0 !important;
+                width: auto !important;
+                height: 28px !important;
+                line-height: 18px !important;
+                margin: 0 !important;
+                background: #0f172a !important;
+                background-color: #0f172a !important;
+                color: #ffffff !important;
+                border: 1px solid #334155 !important;
+                border-radius: 4px !important;
+                padding: 4px 8px !important;
+                font-size: 11px !important;
+                box-sizing: border-box !important;
+                display: block !important;
                 user-select: text !important;
                 -webkit-user-select: text !important;
                 pointer-events: all !important;
             }
             .mpChatSendBtn {
+                flex: 0 0 auto !important;
+                height: 28px !important;
+                line-height: 18px !important;
+                margin: 0 !important;
                 font-size: 10px !important;
-                padding: 3px 8px !important;
+                padding: 4px 10px !important;
+                box-sizing: border-box !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
             }
 
             /* Toast & Invite Banner */
