@@ -43,11 +43,11 @@ function patchIndexJs(src) {
     if (!out.includes("allowMultiInstance")) {
         out = out.replace(
             /const\s+externalMod\s*=\s*app\.commandLine\.getSwitchValue\("load-mod"\);/,
-            `const allowMultiInstance = app.commandLine.hasSwitch("multi-instance");\nconst externalMod = app.commandLine.getSwitchValue("load-mod");\nconst instanceId = app.commandLine.getSwitchValue("instance-id") || (allowMultiInstance ? String(process.pid) : "");\n\nif (allowMultiInstance && instanceId) {\n    const customUserData = path.join(roamingFolder, "shapez.io", "instances", "instance-" + instanceId);\n    fs.mkdirSync(customUserData, { recursive: true });\n    app.setPath("userData", customUserData);\n}`
+            `const allowMultiInstance = app.commandLine.hasSwitch("multi-instance");\nconst externalMod = app.commandLine.getSwitchValue("load-mod");\nconst instanceId = app.commandLine.getSwitchValue("instance-id") || (allowMultiInstance ? String(process.pid) : "");`
         );
         out = out.replace(
             /let\s+storePath\s*=\s*path\.join\(roamingFolder,\s*"shapez\.io",\s*"saves"\);/,
-            `let storePath =\n    allowMultiInstance && instanceId\n        ? path.join(roamingFolder, "shapez.io", "saves-" + instanceId)\n        : path.join(roamingFolder, "shapez.io", "saves");`
+            `if (allowMultiInstance && instanceId) {\n    const customUserData = path.join(roamingFolder, "shapez.io", "instances", "instance-" + instanceId);\n    fs.mkdirSync(customUserData, { recursive: true });\n    app.setPath("userData", customUserData);\n}\n\nlet storePath =\n    allowMultiInstance && instanceId\n        ? path.join(roamingFolder, "shapez.io", "saves-" + instanceId)\n        : path.join(roamingFolder, "shapez.io", "saves");`
         );
         out = out.replace(
             /title:\s*"shapez",/,
