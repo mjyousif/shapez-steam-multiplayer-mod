@@ -1,0 +1,49 @@
+name: CI & Build Verification
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup MSBuild / csc
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Run Unit Tests
+        run: npm run test:unit
+
+      - name: Run E2E Host-Client Network Simulation
+        run: npm run test:e2e
+
+      - name: Build Distribution Package (C# Compiler & Zip)
+        run: npm run package
+
+      - name: Run Installer Binary Smoke Test
+        run: node --test tests/installer-cli.test.js
+
+      - name: Upload PR Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shapez-steam-coop-mod-build
+          path: |
+            dist/ShapezCoopInstaller.exe
+            dist/shapez-steam-coop-mod-*.zip
+          retention-days: 14
