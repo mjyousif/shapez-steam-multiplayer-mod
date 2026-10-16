@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build artifacts and binaries (releases are hosted on GitHub Releases)
+dist/
+bin/
+obj/
+
+# Temporary and backup files
+*.tmp
+*.bak
+*.log
+
+# OS & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.user

@@ -1,0 +1,20 @@
+{
+    "name": "shapez-steam-multiplayer-mod",
+    "version": "1.0.0",
+    "description": "Steam-integrated Co-op Multiplayer Mod and IPC Bridge for shapez.io (v1.5.7)",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mjyousif/shapez-steam-multiplayer-mod.git"
+    },
+    "author": "mjyousif",
+    "license": "MIT",
+    "scripts": {
+        "install-mod": "node scripts/install-mod.js",
+        "uninstall-mod": "node scripts/uninstall-mod.js",
+        "verify": "node scripts/verify-mod.js",
+        "test": "node scripts/verify-mod.js",
+        "package": "node scripts/build-dist.js",
+        "build-dist": "node scripts/build-dist.js",
+        "launch-client": "node scripts/launch-coop-client.js"
+    }
+}
