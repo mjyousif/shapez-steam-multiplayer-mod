@@ -1144,7 +1144,7 @@ namespace ShapezCoopInstaller
                 else if (a == "--version" || a == "-v")
                 {
                     AttachConsole(ATTACH_PARENT_PROCESS);
-                    Console.WriteLine("1.0.0");
+                    Console.WriteLine("1.0.2");
                     return 0;
                 }
                 else if (a == "--backup" || a == "--backup-saves" || a == "-b") isBackup = true;

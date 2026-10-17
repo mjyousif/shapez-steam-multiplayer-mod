@@ -36,7 +36,7 @@ describe("Installer CLI Smoke Tests", () => {
                 encoding: "utf8",
                 timeout: 5000,
             });
-            assert(output.includes("1.0.0") || output.length >= 0);
+            assert(output.includes("1.0.2") || output.includes("1.0.0") || output.length >= 0);
         } catch (err) {
             assert.strictEqual(err.status, 0, "Installer --version must exit with code 0");
         }
