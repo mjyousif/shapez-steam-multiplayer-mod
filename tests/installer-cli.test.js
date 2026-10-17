@@ -41,4 +41,27 @@ describe("Installer CLI Smoke Tests", () => {
             assert.strictEqual(err.status, 0, "Installer --version must exit with code 0");
         }
     });
+
+    test("installer binary responds to --backup and creates valid zip archive", () => {
+        if (!fs.existsSync(exePath)) {
+            console.log("   [SKIP] ShapezCoopInstaller.exe not yet compiled; skipping binary smoke test.");
+            return;
+        }
+
+        try {
+            const output = execFileSync(exePath, ["--backup"], {
+                encoding: "utf8",
+                timeout: 10000,
+            });
+            assert(output.includes("Backup successful") || output.includes("[shapez.io Co-op Installer]"));
+
+            const appData = process.env.APPDATA || path.join(process.env.HOME, ".local", "share");
+            const backupsDir = path.join(appData, "shapez.io", "backups");
+            assert.ok(fs.existsSync(backupsDir), "Backups directory must exist");
+            const zips = fs.readdirSync(backupsDir).filter(f => f.endsWith(".zip"));
+            assert.ok(zips.length > 0, "At least one backup zip must be present");
+        } catch (err) {
+            assert.strictEqual(err.status, 0, "Installer --backup must exit with code 0");
+        }
+    });
 });

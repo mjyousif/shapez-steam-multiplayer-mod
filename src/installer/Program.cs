@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -192,6 +193,84 @@ namespace ShapezCoopInstaller
         public static string GetModFilePath()
         {
             return Path.Combine(GetModsDir(), "steam_multiplayer.js");
+        }
+
+        public static string GetShapezAppDataDir()
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(appData, "shapez.io");
+        }
+
+        public static string GetSavesDir()
+        {
+            return Path.Combine(GetShapezAppDataDir(), "saves");
+        }
+
+        public static string GetBackupsDir()
+        {
+            return Path.Combine(GetShapezAppDataDir(), "backups");
+        }
+
+        public static string BackupSaves(Action<string> log)
+        {
+            if (log == null) log = s => { };
+
+            string savesDir = GetSavesDir();
+            string backupsDir = GetBackupsDir();
+
+            if (!Directory.Exists(savesDir))
+            {
+                throw new DirectoryNotFoundException("Saves directory not found at: " + savesDir + "\nNo shapez.io saves have been created yet.");
+            }
+
+            var saveFiles = Directory.GetFiles(savesDir, "*", SearchOption.AllDirectories);
+            if (saveFiles.Length == 0)
+            {
+                throw new InvalidOperationException("No save files found in: " + savesDir);
+            }
+
+            if (!Directory.Exists(backupsDir))
+            {
+                Directory.CreateDirectory(backupsDir);
+            }
+
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            string zipPath = Path.Combine(backupsDir, "shapez-saves-backup-" + timestamp + ".zip");
+
+            log("Creating save backup archive...");
+            log("Source: " + savesDir);
+            log("Target: " + zipPath);
+
+            long totalBytes = 0;
+            using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+            {
+                var savesDirInfo = new DirectoryInfo(savesDir);
+                foreach (var file in saveFiles)
+                {
+                    var fi = new FileInfo(file);
+                    totalBytes += fi.Length;
+                    string relPath = file.Substring(savesDirInfo.FullName.Length).TrimStart('\\', '/');
+                    archive.CreateEntryFromFile(file, relPath, CompressionLevel.Optimal);
+                    log("  + Added: " + relPath + " (" + fi.Length + " bytes)");
+                }
+            }
+
+            log("\nBackup successful! " + saveFiles.Length + " file(s) (" + (totalBytes / 1024.0).ToString("0.0") + " KB) saved to:\n" + zipPath);
+            return zipPath;
+        }
+
+        public static void OpenFolder(string path)
+        {
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+            }
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = "\"" + path + "\"",
+                UseShellExecute = true
+            });
         }
 
         public static byte[] GetEmbeddedFile(string resourceName)
@@ -588,6 +667,9 @@ namespace ShapezCoopInstaller
         private Button btnInstall;
         private Button btnUninstall;
         private Button btnLaunch;
+        private Button btnBackup;
+        private Button btnOpenSaves;
+        private Button btnOpenBackups;
 
         public MainForm()
         {
@@ -599,7 +681,7 @@ namespace ShapezCoopInstaller
         {
             Text = "shapez.io — Steam Co-op Mod Installer";
             Width = 620;
-            Height = 460;
+            Height = 505;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -664,7 +746,7 @@ namespace ShapezCoopInstaller
             txtLog = new TextBox
             {
                 Location = new Point(20, 175),
-                Size = new Size(560, 175),
+                Size = new Size(560, 160),
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical,
                 ReadOnly = true,
@@ -673,11 +755,12 @@ namespace ShapezCoopInstaller
             };
             Controls.Add(txtLog);
 
+            // Row 1: Core Mod Installation Actions
             btnInstall = new Button
             {
                 Text = "Install / Update Mod",
-                Location = new Point(20, 365),
-                Size = new Size(170, 38),
+                Location = new Point(20, 345),
+                Size = new Size(170, 36),
                 BackColor = Color.FromArgb(28, 110, 242),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -691,8 +774,8 @@ namespace ShapezCoopInstaller
             btnUninstall = new Button
             {
                 Text = "Restore Vanilla",
-                Location = new Point(200, 365),
-                Size = new Size(130, 38),
+                Location = new Point(200, 345),
+                Size = new Size(130, 36),
                 BackColor = Color.FromArgb(235, 238, 242),
                 ForeColor = Color.FromArgb(70, 80, 95),
                 FlatStyle = FlatStyle.Flat,
@@ -705,8 +788,8 @@ namespace ShapezCoopInstaller
             btnLaunch = new Button
             {
                 Text = "Launch shapez via Steam",
-                Location = new Point(380, 365),
-                Size = new Size(200, 38),
+                Location = new Point(340, 345),
+                Size = new Size(240, 36),
                 BackColor = Color.FromArgb(46, 125, 50),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -716,6 +799,62 @@ namespace ShapezCoopInstaller
             btnLaunch.FlatAppearance.BorderSize = 0;
             btnLaunch.Click += BtnLaunch_Click;
             Controls.Add(btnLaunch);
+
+            // Row 2: Saves Backup & Folder Utilities
+            btnBackup = new Button
+            {
+                Text = "Backup Saves (.zip)",
+                Location = new Point(20, 392),
+                Size = new Size(170, 34),
+                BackColor = Color.FromArgb(79, 70, 229),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnBackup.FlatAppearance.BorderSize = 0;
+            btnBackup.Click += BtnBackup_Click;
+            Controls.Add(btnBackup);
+
+            btnOpenSaves = new Button
+            {
+                Text = "Open Saves Folder",
+                Location = new Point(200, 392),
+                Size = new Size(175, 34),
+                BackColor = Color.FromArgb(235, 238, 242),
+                ForeColor = Color.FromArgb(60, 70, 85),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.75f),
+                Cursor = Cursors.Hand
+            };
+            btnOpenSaves.FlatAppearance.BorderSize = 0;
+            btnOpenSaves.Click += BtnOpenSaves_Click;
+            Controls.Add(btnOpenSaves);
+
+            btnOpenBackups = new Button
+            {
+                Text = "Open Backups Folder",
+                Location = new Point(385, 392),
+                Size = new Size(195, 34),
+                BackColor = Color.FromArgb(235, 238, 242),
+                ForeColor = Color.FromArgb(60, 70, 85),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.75f),
+                Cursor = Cursors.Hand
+            };
+            btnOpenBackups.FlatAppearance.BorderSize = 0;
+            btnOpenBackups.Click += BtnOpenBackups_Click;
+            Controls.Add(btnOpenBackups);
+
+            var lblSaveNote = new Label
+            {
+                Text = "Your saves are 100% safe — neither install nor uninstall alters or deletes them.",
+                ForeColor = Color.FromArgb(120, 130, 145),
+                Font = new Font("Segoe UI", 8.25f, FontStyle.Italic),
+                Location = new Point(22, 434),
+                Size = new Size(560, 20)
+            };
+            Controls.Add(lblSaveNote);
         }
 
         private void AppendLog(string message)
@@ -911,6 +1050,66 @@ namespace ShapezCoopInstaller
                 MessageBox.Show("Could not launch Steam game:\n" + ex.Message, "Launch Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
+
+        private void BtnBackup_Click(object sender, EventArgs e)
+        {
+            txtLog.Clear();
+            AppendLog("=== Backing Up Shapez Save Games ===");
+            btnBackup.Enabled = false;
+
+            try
+            {
+                string zipPath = InstallerLogic.BackupSaves(AppendLog);
+                var choice = MessageBox.Show(
+                    "Your shapez.io save files were successfully backed up to:\n\n" + zipPath +
+                    "\n\nWould you like to open the Backups folder now?",
+                    "Saves Backed Up",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+
+                if (choice == DialogResult.Yes)
+                {
+                    InstallerLogic.OpenFolder(InstallerLogic.GetBackupsDir());
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("\nERROR: " + ex.Message);
+                MessageBox.Show(
+                    "Failed to backup saves:\n" + ex.Message,
+                    "Backup Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                btnBackup.Enabled = true;
+            }
+        }
+
+        private void BtnOpenSaves_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                InstallerLogic.OpenFolder(InstallerLogic.GetSavesDir());
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not open saves folder:\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void BtnOpenBackups_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                InstallerLogic.OpenFolder(InstallerLogic.GetBackupsDir());
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not open backups folder:\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
     }
 
     public static class Program
@@ -924,6 +1123,7 @@ namespace ShapezCoopInstaller
         {
             bool isSilent = false;
             bool isUninstall = false;
+            bool isBackup = false;
             string customPath = null;
 
             for (int i = 0; i < args.Length; i++)
@@ -936,6 +1136,7 @@ namespace ShapezCoopInstaller
                     Console.WriteLine("Usage: ShapezCoopInstaller.exe [options]");
                     Console.WriteLine("  --silent, -s       Install mod and patches quietly without UI");
                     Console.WriteLine("  --uninstall, -u    Uninstall mod and restore vanilla shapez.io");
+                    Console.WriteLine("  --backup, -b       Create a timestamped .zip backup of shapez saves");
                     Console.WriteLine("  --path <dir>       Specify custom shapez.io installation path");
                     Console.WriteLine("  --help, -h         Show this help message");
                     return 0;
@@ -946,11 +1147,28 @@ namespace ShapezCoopInstaller
                     Console.WriteLine("1.0.0");
                     return 0;
                 }
+                else if (a == "--backup" || a == "--backup-saves" || a == "-b") isBackup = true;
                 else if (a == "--silent" || a == "-s" || a == "/silent") isSilent = true;
                 else if (a == "--uninstall" || a == "-u" || a == "/uninstall") isUninstall = true;
                 else if (a == "--path" && i + 1 < args.Length)
                 {
                     customPath = args[++i];
+                }
+            }
+
+            if (isBackup)
+            {
+                AttachConsole(ATTACH_PARENT_PROCESS);
+                Console.WriteLine("\n[shapez.io Co-op Installer] Backing up saves...");
+                try
+                {
+                    string zip = InstallerLogic.BackupSaves(Console.WriteLine);
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("\n[ERROR] " + ex.Message);
+                    return 1;
                 }
             }
 

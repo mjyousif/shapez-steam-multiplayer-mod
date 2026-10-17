@@ -11,6 +11,7 @@
     "scripts": {
         "install-mod": "node scripts/install-mod.js",
         "uninstall-mod": "node scripts/uninstall-mod.js",
+        "backup-saves": "node scripts/backup-saves.js",
         "verify": "node scripts/verify-mod.js",
         "check:syntax": "node scripts/check-syntax.js",
         "test:unit": "node --test",

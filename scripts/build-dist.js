@@ -47,6 +47,8 @@ function main() {
         "/r:System.Drawing.dll",
         "/r:System.Windows.Forms.dll",
         "/r:System.Web.Extensions.dll",
+        "/r:System.IO.Compression.dll",
+        "/r:System.IO.Compression.FileSystem.dll",
     ];
 
     try {
@@ -127,6 +129,16 @@ HOW TO PLAY CO-OP TOGETHER:
    - "Join Game": If your friend is already hosting, their name will appear
      in your Steam Friends list on the right—just click "Join Game" next
      to their name, or accept the green in-game invite notification!
+
+------------------------------------------------------------------------
+SAVE GAMES & BACKUPS:
+------------------------------------------------------------------------
+- Your shapez save games are 100% SAFE: neither installing nor uninstalling
+  ever touches or deletes your save files.
+- To create a timestamped backup archive of your saves at any time:
+  - Click "Backup Saves (.zip)" in ShapezCoopInstaller.exe, OR
+  - Run "ShapezCoopInstaller.exe --backup"
+  Backups are saved to %APPDATA%\shapez.io\backups\.
 
 ------------------------------------------------------------------------
 HOW TO UNINSTALL / RESTORE VANILLA:
