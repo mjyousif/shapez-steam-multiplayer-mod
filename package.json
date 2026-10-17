@@ -7,7 +7,7 @@
         "url": "https://github.com/mjyousif/shapez-steam-multiplayer-mod.git"
     },
     "author": "mjyousif",
-    "license": "MIT",
+    "license": "GPL-3.0-or-later",
     "scripts": {
         "install-mod": "node scripts/install-mod.js",
         "uninstall-mod": "node scripts/uninstall-mod.js",
