@@ -4,7 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { patchAsarArchive, patchIndexJs } = require("../scripts/install-mod");
+const vm = require("node:vm");
+const { patchAsarArchive, patchIndexJs, patchPreloadJs, patchSteamJs } = require("../scripts/install-mod");
 
 function createMockAsar(filesMap) {
     const headerObj = { files: {} };
@@ -171,6 +172,124 @@ if (mods.length === 0) { steam.listen(); }
         const patched = patchIndexJs(mockVanillaIndex);
         assert(patched.includes("page-title-updated"), "Must handle page-title-updated");
         assert(patched.includes("instTitle"), "Must set instTitle on multi-instance");
+    });
+
+    test("patchPreloadJs wraps ipcRenderer.on to support listener removal and cleanup", () => {
+        const mockVanillaPreload = `
+const { ipcRenderer } = require("electron");
+window.ipcRenderer = {
+    on: ipcRenderer.on.bind(ipcRenderer),
+    send: ipcRenderer.send.bind(ipcRenderer)
+};
+`;
+        const patched = patchPreloadJs(mockVanillaPreload);
+        assert(patched.includes("removeListener"), "Must add removeListener");
+        assert(patched.includes("wrapped"), "Must wrap listener callback");
+    });
+
+    test("patchSteamJs appends steam_bridge module export cleanly", () => {
+        const mockVanillaSteam = `
+function init() { console.log('vanilla steam init'); }
+module.exports = { init };
+`;
+        const patched = patchSteamJs(mockVanillaSteam);
+        assert(patched.includes("steam_bridge"), "Must require steam_bridge");
+        assert(patched.includes("module.exports = _steamBridge;"), "Must export steam_bridge");
+    });
+
+    test("patchIndexJs, patchPreloadJs, and patchSteamJs are idempotent (repeat runs produce identical code)", () => {
+        const sampleIndex = `
+const isDev = app.commandLine.hasSwitch("dev");
+const externalMod = app.commandLine.getSwitchValue("load-mod");
+const roamingFolder = process.env.APPDATA;
+let storePath = path.join(roamingFolder, "shapez.io", "saves");
+title: "shapez",
+mainWindowState.manage(win);
+win.on("closed", () => { console.log("Window closed"); win = null; });
+if (!app.requestSingleInstanceLock()) { app.exit(0); } else {
+steam.init(isDev);
+if (mods.length === 0) { steam.listen(); }
+`;
+        const samplePreload = `on: ipcRenderer.on.bind(ipcRenderer),`;
+        const sampleSteam = `module.exports = {};`;
+
+        const indexPass1 = patchIndexJs(sampleIndex);
+        const indexPass2 = patchIndexJs(indexPass1);
+        assert.strictEqual(indexPass1, indexPass2, "patchIndexJs must be idempotent");
+
+        const preloadPass1 = patchPreloadJs(samplePreload);
+        const preloadPass2 = patchPreloadJs(preloadPass1);
+        assert.strictEqual(preloadPass1, preloadPass2, "patchPreloadJs must be idempotent");
+
+        const steamPass1 = patchSteamJs(sampleSteam);
+        const steamPass2 = patchSteamJs(steamPass1);
+        assert.strictEqual(steamPass1, steamPass2, "patchSteamJs must be idempotent");
+    });
+
+    test("transformed JavaScript produces 100% syntactically valid code", () => {
+        const sampleIndex = `
+const app = { commandLine: { hasSwitch: () => false, getSwitchValue: () => "" }, setPath: () => {} };
+const isDev = false;
+const path = require("path");
+const fs = require("fs");
+const externalMod = app.commandLine.getSwitchValue("load-mod");
+const roamingFolder = process.env.APPDATA || "";
+let storePath = path.join(roamingFolder, "shapez.io", "saves");
+const mainWindowState = { manage: () => {} };
+let win = { setTitle: () => {}, on: () => {} };
+const steam = { init: () => {}, listen: () => {}, setMainWindow: () => {} };
+const mods = [];
+title: "shapez",
+mainWindowState.manage(win);
+win.on("closed", () => { console.log("Window closed"); win = null; });
+if (!app.requestSingleInstanceLock) { } else {
+steam.init(isDev);
+if (mods.length === 0) { steam.listen(); }
+}
+`;
+        const patchedIndex = patchIndexJs(sampleIndex);
+        assert.doesNotThrow(() => {
+            new vm.Script(patchedIndex);
+        }, "Patched index.js must compile without syntax errors");
+
+        const samplePreload = `
+const ipcRenderer = { on: () => {}, removeListener: () => {} };
+const bridge = {
+    on: ipcRenderer.on.bind(ipcRenderer),
+};
+`;
+        const patchedPreload = patchPreloadJs(samplePreload);
+        assert.doesNotThrow(() => {
+            new vm.Script(patchedPreload);
+        }, "Patched preload.js must compile without syntax errors");
+
+        const sampleSteam = `
+function init() {}
+module.exports = { init };
+`;
+        const patchedSteam = patchSteamJs(sampleSteam);
+        assert.doesNotThrow(() => {
+            new vm.Script(patchedSteam);
+        }, "Patched steam.js must compile without syntax errors");
+    });
+
+    test("patchAsarArchive rejects corrupted ASAR archives with invalid header size", () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shapez-corrupt-"));
+        const corruptFile = path.join(tmpDir, "bad.asar");
+        const targetFile = path.join(tmpDir, "out.asar");
+
+        try {
+            // Buffer with invalid outer pickle size (99 instead of 4)
+            const badBuf = Buffer.alloc(32);
+            badBuf.writeUInt32LE(99, 0);
+            fs.writeFileSync(corruptFile, badBuf);
+
+            assert.throws(() => {
+                patchAsarArchive(corruptFile, targetFile);
+            }, /Invalid ASAR header/);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
     });
 });
 

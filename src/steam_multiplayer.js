@@ -77,7 +77,7 @@ function decodeJoinCode(code) {
     }
 }
 
-class HUDMultiplayer extends shapez.BaseHUDPart {
+class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPart ? shapez.BaseHUDPart : class {}) {
     createElements(parent) {
         this.container = shapez.makeDiv(
             parent,
@@ -314,7 +314,7 @@ class HUDMultiplayer extends shapez.BaseHUDPart {
     }
 }
 
-class Mod extends shapez.Mod {
+class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : class {}) {
     init() {
         window.$shapezMultiplayerMod = this;
 
@@ -349,6 +349,7 @@ class Mod extends shapez.Mod {
         this.isInsidePlaceBuilding = false;
         this.pendingActionsQueue = [];
         this.lastHubSyncTime = 0;
+        this.activeCoopSavegame = null;
 
         this.injectStyles();
         this.setupIpcListeners();
@@ -933,6 +934,7 @@ class Mod extends shapez.Mod {
         this.remotePlayers.clear();
         this.clientChunkBuffer.clear();
         this.pendingActionsQueue = [];
+        this.activeCoopSavegame = null;
         this.role = "none";
         this.lobbyId = "";
         this.joinCode = "";
@@ -992,6 +994,7 @@ class Mod extends shapez.Mod {
         if (this.role !== "client") return;
         this.role = "none";
         this.remotePlayers.clear();
+        this.activeCoopSavegame = null;
         if (this.currentHud) {
             this.currentHud.refreshUI();
             this.currentHud.appendChatLine("System", "#f43f5e", "Disconnected from Host.", true);
@@ -1345,10 +1348,15 @@ class Mod extends shapez.Mod {
         if (!worldDump) return;
         this.closeMultiplayerModal();
 
-        let savegame = this.currentRoot?.savegame;
+        // Ensure client singleplayer saves are NEVER overwritten:
+        // Only reuse activeCoopSavegame if we are already in an active co-op session and resyncing.
+        // Otherwise, create a dedicated new savegame instance.
+        let savegame = this.activeCoopSavegame;
         if (!savegame) {
             savegame = this.app.savegameMgr.createNewSavegame();
+            this.activeCoopSavegame = savegame;
         }
+
         savegame.currentData = {
             version: savegame.getCurrentVersion(),
             dump: worldDump,
@@ -1359,12 +1367,14 @@ class Mod extends shapez.Mod {
         const safeHost = String(hostName || "Host")
             .replace(/[^a-zA-Z0-9_\- ]/g, "")
             .slice(0, 12);
-        savegame.metaDataRef.name = "Coop " + safeHost;
+        savegame.metaDataRef.name = "Co-op (" + safeHost + ")";
         savegame.metaDataRef.level = (worldDump.hubGoals && worldDump.hubGoals.level) || 1;
 
         try {
             await savegame.writeSavegameAndMetadata();
-        } catch (e) {}
+        } catch (e) {
+            console.warn("[Steam MP] Failed to write initial co-op savegame:", e);
+        }
 
         this.app.stateMgr.moveToState("InGameState", {
             savegame,
@@ -2978,4 +2988,16 @@ class Mod extends shapez.Mod {
             }
         `);
     }
+}
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        METADATA,
+        PLAYER_COLORS,
+        escapeHtml,
+        encodeJoinCode,
+        decodeJoinCode,
+        HUDMultiplayer,
+        Mod,
+    };
 }
