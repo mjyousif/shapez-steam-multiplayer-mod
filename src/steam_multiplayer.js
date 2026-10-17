@@ -352,6 +352,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.lastHubSyncTime = 0;
         this.activeCoopSavegame = null;
         this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
         this.lastCursorStateKey = "";
         this.lastCursorSentAt = 0;
         this.clientHelloTimer = null;
@@ -572,8 +574,14 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     getLocalPlayerInfo() {
         const p = this.steamStatus?.profile || {};
         return {
-            id: p.steamId || "local_player",
-            name: p.name || "Player",
+            id:
+                this.role === "client" && this.assignedPlayerId
+                    ? this.assignedPlayerId
+                    : p.steamId || "local_player",
+            name:
+                this.role === "client" && this.assignedPlayerName
+                    ? this.assignedPlayerName
+                    : p.name || "Player",
             color: this.role === "host" ? PLAYER_COLORS[0] : this.assignedColor || PLAYER_COLORS[1],
             isHost: this.role === "host",
             isLocal: true,
@@ -825,6 +833,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.pendingActionsQueue = [];
         this.activeCoopSavegame = null;
         this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
         this.lastCursorStateKey = "";
         this.role = "none";
         this.lobbyId = "";
@@ -887,6 +897,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         }
         this.role = "none";
         this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
         this.remotePlayers.clear();
         this.activeCoopSavegame = null;
         if (this.currentHud) {
@@ -992,8 +1004,29 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
         switch (msg.type) {
             case "HELLO": {
-                peer.playerId = msg.playerId || peerId;
-                peer.name = msg.name || peer.name;
+                const hostLocal = this.getLocalPlayerInfo();
+                let resolvedId = msg.playerId || peerId;
+                let resolvedName = msg.name || peer.name;
+
+                // Disambiguate if connecting from a second instance on the same Steam account (or duplicate ID)
+                let collision = resolvedId === hostLocal.id;
+                if (!collision) {
+                    for (const [otherPeerId, otherPeer] of this.peers) {
+                        if (otherPeerId !== peerId && otherPeer.playerId === resolvedId) {
+                            collision = true;
+                            break;
+                        }
+                    }
+                }
+                if (collision) {
+                    resolvedId = `${resolvedId}_${peerId}`;
+                    if (resolvedName === hostLocal.name) {
+                        resolvedName = `${resolvedName} (2)`;
+                    }
+                }
+
+                peer.playerId = resolvedId;
+                peer.name = resolvedName;
                 peer.ready = true;
 
                 this.remotePlayers.set(peer.playerId, {
@@ -1098,6 +1131,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 type: "WELCOME_WORLD",
                 hostId: local.id,
                 hostName: local.name,
+                assignedPlayerId: peer.playerId,
+                assignedPlayerName: peer.name,
                 assignedColor: peer.color,
                 mode: this.mode,
                 roster: this.buildRosterPayload(),
@@ -1146,6 +1181,12 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     this.clientHelloTimer = null;
                 }
                 this.logInfo(`Received WELCOME_WORLD from Host (${msg.hostName || msg.hostId})`);
+                if (msg.assignedPlayerId) {
+                    this.assignedPlayerId = msg.assignedPlayerId;
+                }
+                if (msg.assignedPlayerName) {
+                    this.assignedPlayerName = msg.assignedPlayerName;
+                }
                 this.assignedColor = msg.assignedColor || PLAYER_COLORS[1];
                 this.mode = msg.mode || "coop";
                 if (Array.isArray(msg.roster)) {
