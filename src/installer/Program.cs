@@ -608,7 +608,18 @@ namespace ShapezCoopInstaller
             File.Move(tempAsar, asarPath);
             log("app.asar patched successfully!");
 
-            // 3. Mod file in %APPDATA%\shapez.io\mods
+            // 3. Deploy native Steam P2P bridge (steam_p2p_win64.node)
+            string p2pDir = Path.Combine(resourcesDir, @"app.asar.unpacked\node_modules\shapez.io-private-artifacts\steam\lib\win64");
+            string p2pPath = Path.Combine(p2pDir, "steam_p2p_win64.node");
+            if (!Directory.Exists(p2pDir))
+            {
+                Directory.CreateDirectory(p2pDir);
+            }
+            log("Deploying native Steamworks P2P bridge to:\n" + p2pPath);
+            byte[] p2pBytes = GetEmbeddedFile("steam_p2p_win64.node");
+            File.WriteAllBytes(p2pPath, p2pBytes);
+
+            // 4. Mod file in %APPDATA%\shapez.io\mods
             string modsDir = GetModsDir();
             string modFilePath = GetModFilePath();
             if (!Directory.Exists(modsDir))
@@ -630,6 +641,7 @@ namespace ShapezCoopInstaller
             string resourcesDir = Path.Combine(shapezDir, "resources");
             string asarPath = Path.Combine(resourcesDir, "app.asar");
             string backupPath = Path.Combine(resourcesDir, "app.asar.vanilla.bak");
+            string p2pPath = Path.Combine(resourcesDir, @"app.asar.unpacked\node_modules\shapez.io-private-artifacts\steam\lib\win64\steam_p2p_win64.node");
             string modFilePath = GetModFilePath();
 
             if (File.Exists(backupPath))
@@ -641,6 +653,12 @@ namespace ShapezCoopInstaller
             else
             {
                 log("No vanilla backup (app.asar.vanilla.bak) found.");
+            }
+
+            if (File.Exists(p2pPath))
+            {
+                log("Removing native Steamworks P2P bridge...");
+                try { File.Delete(p2pPath); } catch { }
             }
 
             if (File.Exists(modFilePath))

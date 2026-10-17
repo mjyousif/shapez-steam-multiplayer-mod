@@ -342,6 +342,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.remotePlayers = new Map(); // playerId -> { id, name, color, x, y, renderX, renderY, layer, buildingId, variant, rotation, rotationVariant, lastUpdate }
         this.activePings = []; // { x, y, color, name, createdAt }
         this.clientChunkBuffer = new Map(); // transferId -> { chunks: [], received: 0, total: 0 }
+        this.pendingIceCandidates = new Map(); // steamId -> Array<RTCIceCandidateInit>
 
         this.currentRoot = null;
         this.currentHud = null;
@@ -350,6 +351,12 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.pendingActionsQueue = [];
         this.lastHubSyncTime = 0;
         this.activeCoopSavegame = null;
+        this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
+        this.lastCursorStateKey = "";
+        this.lastCursorSentAt = 0;
+        this.clientHelloTimer = null;
 
         this.injectStyles();
         this.setupIpcListeners();
@@ -390,8 +397,28 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     }
 
     // =========================================================================
-    // Steam & Electron Main-Process IPC Setup
+    // Persistent Logging & Steam / Electron Main-Process IPC Setup
     // =========================================================================
+
+    logInfo(message) {
+        console.log("[Steam MP]", message);
+        if (typeof ipcRenderer !== "undefined" && typeof ipcRenderer.invoke === "function") {
+            try {
+                const p = ipcRenderer.invoke("steam:mp:log", { level: "INFO", message });
+                if (p && typeof p.catch === "function") p.catch(() => {});
+            } catch (e) {}
+        }
+    }
+
+    logWarn(message) {
+        console.warn("[Steam MP]", message);
+        if (typeof ipcRenderer !== "undefined" && typeof ipcRenderer.invoke === "function") {
+            try {
+                const p = ipcRenderer.invoke("steam:mp:log", { level: "WARN", message });
+                if (p && typeof p.catch === "function") p.catch(() => {});
+            } catch (e) {}
+        }
+    }
 
     async refreshSteamStatus() {
         if (typeof ipcRenderer === "undefined") {
@@ -403,7 +430,9 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             if (status) {
                 this.bridgeAvailable = true;
                 this.steamStatus = status;
-                console.log("[Steam MP] Loaded Steam Status:", status);
+                this.logInfo(
+                    `Loaded Steam Status: initialized=${status.initialized} steamId=${status.profile?.steamId} name=${status.profile?.name}`
+                );
                 this.updateMainMenuBadge();
 
                 // Check if launched with +connect_lobby or +connect_ip
@@ -465,7 +494,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 } else if (lobbyMatch && lobbyMatch[1]) {
                     this.joinSteamLobby(lobbyMatch[1], ev.friendId);
                 } else if (ev.friendId) {
-                    this.requestJoinViaSteamSignal(ev.friendId);
+                    this.connectToHost({ endpoints: [], lobbyId: "", hostSteamId: ev.friendId });
                 }
                 break;
             }
@@ -489,26 +518,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 });
                 break;
             }
-            case "WEBRTC_OFFER": {
-                if (this.role !== "host") return;
-                await this.handleIncomingWebRtcOffer(fromSteamId, fromName, data.sdp);
-                break;
-            }
-            case "WEBRTC_ANSWER": {
-                if (this.role !== "client") return;
-                await this.handleIncomingWebRtcAnswer(fromSteamId, data.sdp);
-                break;
-            }
-            case "WEBRTC_ICE": {
-                await this.handleIncomingWebRtcIce(fromSteamId, data.candidate);
-                break;
-            }
             case "STEAM_PACKET": {
-                // Direct packet relay over Steam Friends Chat fallback
                 if (this.role === "host") {
                     const peerId = "steam_" + fromSteamId;
                     if (!this.peers.has(peerId)) {
-                        this.registerHostPeer(peerId, "steam-relay", fromSteamId);
+                        this.registerHostPeer(peerId, "steam-p2p", fromSteamId);
                     }
                     this.onHostReceivedPeerMessage(peerId, data.packet);
                 } else if (this.role === "client") {
@@ -550,161 +564,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     }
 
     // =========================================================================
-    // WebRTC P2P DataChannel over Steam Signaling
-    // =========================================================================
-
-    createRtcPeerConnection(remoteSteamId, isHost, peerId) {
-        const pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-            ],
-        });
-
-        pc.onicecandidate = event => {
-            if (event.candidate && remoteSteamId) {
-                ipcRenderer.invoke("steam:mp:send-friend-signal", {
-                    friendSteamId: remoteSteamId,
-                    data: {
-                        kind: "WEBRTC_ICE",
-                        candidate: event.candidate,
-                    },
-                });
-            }
-        };
-
-        if (isHost) {
-            pc.ondatachannel = event => {
-                const dc = event.channel;
-                this.setupHostRtcDataChannel(peerId, remoteSteamId, pc, dc);
-            };
-        }
-
-        return pc;
-    }
-
-    setupHostRtcDataChannel(peerId, remoteSteamId, pc, dc) {
-        dc.onopen = () => {
-            const peer = this.registerHostPeer(peerId, "webrtc", remoteSteamId);
-            peer.rtcPc = pc;
-            peer.rtcDc = dc;
-        };
-        dc.onmessage = ev => {
-            try {
-                const msg = JSON.parse(ev.data);
-                this.onHostReceivedPeerMessage(peerId, msg);
-            } catch (e) {}
-        };
-        dc.onclose = () => {
-            this.handleHostPeerDisconnected(peerId);
-        };
-    }
-
-    async handleIncomingWebRtcOffer(fromSteamId, fromName, sdp) {
-        try {
-            const peerId = "rtc_" + fromSteamId;
-            const pc = this.createRtcPeerConnection(fromSteamId, true, peerId);
-            const peer = this.registerHostPeer(peerId, "webrtc", fromSteamId);
-            peer.name = fromName || peer.name;
-            peer.rtcPc = pc;
-
-            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-
-            await ipcRenderer.invoke("steam:mp:send-friend-signal", {
-                friendSteamId: fromSteamId,
-                data: {
-                    kind: "WEBRTC_ANSWER",
-                    sdp: pc.localDescription,
-                },
-            });
-        } catch (err) {
-            console.warn("[Steam MP] WebRTC Offer handling failed:", err);
-        }
-    }
-
-    async handleIncomingWebRtcAnswer(fromSteamId, sdp) {
-        if (!this.clientRtcPc) return;
-        try {
-            await this.clientRtcPc.setRemoteDescription(new RTCSessionDescription(sdp));
-        } catch (err) {
-            console.warn("[Steam MP] WebRTC Answer handling failed:", err);
-        }
-    }
-
-    async handleIncomingWebRtcIce(fromSteamId, candidate) {
-        try {
-            if (this.role === "host") {
-                const peer = this.peers.get("rtc_" + fromSteamId);
-                if (peer && peer.rtcPc && candidate) {
-                    await peer.rtcPc.addIceCandidate(new RTCIceCandidate(candidate));
-                }
-            } else if (this.role === "client" && this.clientRtcPc && candidate) {
-                await this.clientRtcPc.addIceCandidate(new RTCIceCandidate(candidate));
-            }
-        } catch (e) {}
-    }
-
-    async connectClientWebRtcOverSteam(hostSteamId, timeoutMs = 6000) {
-        if (!hostSteamId) throw new Error("No host Steam ID for WebRTC");
-        const pc = this.createRtcPeerConnection(hostSteamId, false, "host");
-        this.clientRtcPc = pc;
-        const dc = pc.createDataChannel("shapez_mp", { ordered: true });
-        this.clientRtcDc = dc;
-
-        return new Promise((resolve, reject) => {
-            let settled = false;
-            const timer = setTimeout(() => {
-                if (!settled) {
-                    settled = true;
-                    reject(new Error("WebRTC P2P handshake timed out"));
-                }
-            }, timeoutMs);
-
-            dc.onopen = () => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer);
-                this.clientTransport = "webrtc";
-                resolve({ connected: true, transport: "webrtc" });
-            };
-
-            dc.onmessage = ev => {
-                try {
-                    const msg = JSON.parse(ev.data);
-                    this.onClientReceivedMessage(msg);
-                } catch (e) {}
-            };
-
-            dc.onclose = () => {
-                if (this.clientTransport === "webrtc") {
-                    this.onClientDisconnected();
-                }
-            };
-
-            pc.createOffer()
-                .then(offer => pc.setLocalDescription(offer))
-                .then(() =>
-                    ipcRenderer.invoke("steam:mp:send-friend-signal", {
-                        friendSteamId: hostSteamId,
-                        data: {
-                            kind: "WEBRTC_OFFER",
-                            sdp: pc.localDescription,
-                        },
-                    })
-                )
-                .catch(err => {
-                    if (!settled) {
-                        settled = true;
-                        clearTimeout(timer);
-                        reject(err);
-                    }
-                });
-        });
-    }
-
-    // =========================================================================
     // Hosting & Joining Flows
     // =========================================================================
 
@@ -715,8 +574,14 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     getLocalPlayerInfo() {
         const p = this.steamStatus?.profile || {};
         return {
-            id: p.steamId || "local_player",
-            name: p.name || "Player",
+            id:
+                this.role === "client" && this.assignedPlayerId
+                    ? this.assignedPlayerId
+                    : p.steamId || "local_player",
+            name:
+                this.role === "client" && this.assignedPlayerName
+                    ? this.assignedPlayerName
+                    : p.name || "Player",
             color: this.role === "host" ? PLAYER_COLORS[0] : this.assignedColor || PLAYER_COLORS[1],
             isHost: this.role === "host",
             isLocal: true,
@@ -761,6 +626,9 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.lobbyId = lobbyInfo.lobbyId;
         this.hostSteamId = lobbyInfo.hostId;
         this.joinCode = encodeJoinCode(allEndpoints, this.lobbyId, this.hostSteamId);
+        this.logInfo(
+            `Hosting started: port=${netInfo.port} endpoints=${allEndpoints} lobbyId=${this.lobbyId} hostSteamId=${this.hostSteamId}`
+        );
 
         this.showToast(`Hosting Co-op on port ${netInfo.port} (Steam Lobby Ready)`);
 
@@ -795,26 +663,23 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     async joinSteamLobby(lobbyId, hostFriendSteamId = "") {
         try {
             this.showToast("Joining Steam Co-op Lobby...");
-            const info = await ipcRenderer.invoke("steam:mp:join-lobby", lobbyId);
+            const joinArg = hostFriendSteamId ? { lobbyId, hostSteamId: hostFriendSteamId } : lobbyId;
+            const info = await ipcRenderer.invoke("steam:mp:join-lobby", joinArg);
             const endpointsStr = info.endpoints || "";
             const hostId = info.hostId || hostFriendSteamId || "";
-            if (endpointsStr) {
+            const resolvedLobbyId = info.lobbyId || lobbyId || "";
+            if (endpointsStr || hostId || resolvedLobbyId) {
                 await this.connectToHost({
-                    endpoints: endpointsStr.split(","),
-                    lobbyId,
+                    endpoints: endpointsStr ? endpointsStr.split(",").filter(Boolean) : [],
+                    lobbyId: resolvedLobbyId,
                     hostSteamId: hostId,
-                });
-            } else if (hostId) {
-                await this.connectToHost({
-                    endpoints: [],
-                    lobbyId,
-                    hostSteamId: hostId,
+                    alreadyJoinedLobby: true,
                 });
             } else {
                 this.showToast("Could not resolve host address from lobby. Try using Join Code or IP:Port.");
             }
         } catch (err) {
-            console.error("[Steam MP] Failed to join Steam lobby:", err);
+            this.logWarn("Failed to join Steam lobby: " + (err.message || err));
             this.showToast("Failed to join Steam Lobby: " + (err.message || err));
         }
     }
@@ -839,7 +704,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         });
     }
 
-    async connectToHost({ endpoints = [], lobbyId = "", hostSteamId = "" }) {
+    async connectToHost({ endpoints = [], lobbyId = "", hostSteamId = "", alreadyJoinedLobby = false }) {
         await this.stopSession(false);
         await this.refreshSteamStatus();
 
@@ -847,62 +712,109 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.lobbyId = lobbyId;
         this.hostSteamId = hostSteamId;
         this.clientTransport = "";
+        this.clientWorldLoaded = false;
+
+        // Join the Host's Steam Lobby whenever a lobbyId or hostSteamId is available
+        if (!alreadyJoinedLobby && (lobbyId || hostSteamId) && typeof ipcRenderer !== "undefined") {
+            try {
+                const joinArg = hostSteamId ? { lobbyId, hostSteamId } : lobbyId;
+                const lobbyInfo = await ipcRenderer.invoke("steam:mp:join-lobby", joinArg);
+                if (lobbyInfo) {
+                    if (lobbyInfo.lobbyId) this.lobbyId = lobbyInfo.lobbyId;
+                    if (lobbyInfo.hostId && !this.hostSteamId) this.hostSteamId = lobbyInfo.hostId;
+                    if (lobbyInfo.endpoints) {
+                        for (const ep of lobbyInfo.endpoints.split(",").filter(Boolean)) {
+                            if (!endpoints.includes(ep)) {
+                                endpoints.push(ep);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                this.logWarn("join-lobby pre-step warning: " + (e.message || e));
+            }
+        }
 
         let connected = false;
+        const localSteamId = this.getLocalPlayerInfo().id;
+        const isRemoteSteamHost = Boolean(this.hostSteamId && this.hostSteamId !== localSteamId);
 
-        // 1. Try TCP endpoints (LAN / VPN / Localhost / Direct IP)
-        for (const ep of endpoints) {
-            const [host, portStr] = ep.trim().split(":");
+        // 1. Try direct TCP endpoints (Localhost / LAN / UPnP)
+        const cleanEndpoints = Array.from(new Set(endpoints.map(e => e.trim()).filter(Boolean)));
+        for (const ep of cleanEndpoints) {
+            const [host, portStr] = ep.split(":");
             const port = Number(portStr) || 27080;
             if (!host) continue;
+            const isLoopback = host === "127.0.0.1" || host === "localhost";
+            if (isRemoteSteamHost && isLoopback) continue;
+            const tcpTimeout = isRemoteSteamHost ? 1200 : 3000;
             try {
                 this.showToast(`Connecting to ${host}:${port}...`);
                 await ipcRenderer.invoke("mp:net:client-connect", {
                     host,
                     port,
-                    timeoutMs: 3500,
+                    timeoutMs: tcpTimeout,
                 });
                 this.clientTransport = "tcp";
                 this.hostEndpoint = `${host}:${port}`;
                 connected = true;
+                this.logInfo(`Connected to Host via TCP ${host}:${port}`);
                 break;
             } catch (e) {
-                console.warn(`[Steam MP] TCP connect to ${host}:${port} failed:`, e.message);
+                this.logWarn(`TCP connect to ${host}:${port} failed: ${e.message}`);
             }
         }
 
-        // 2. Try WebRTC P2P over Steam Friends Signaling if TCP wasn't reachable
-        if (!connected && hostSteamId) {
-            try {
-                this.showToast("Connecting via Steam P2P (WebRTC)...");
-                await this.connectClientWebRtcOverSteam(hostSteamId, 6000);
-                connected = true;
-            } catch (e) {
-                console.warn("[Steam MP] WebRTC P2P failed, falling back to Steam Friend Relay:", e.message);
-                this.clientTransport = "steam-relay";
-                connected = true;
-            }
+        // 2. Use Native Steamworks ISteamNetworking P2P if TCP wasn't reachable
+        if (!connected && (this.hostSteamId || this.lobbyId)) {
+            this.clientTransport = "steam-p2p";
+            if (!this.hostSteamId) this.hostSteamId = "host";
+            connected = true;
+            this.logInfo(`Connecting to Host ${this.hostSteamId} via Native Steam P2P`);
         }
 
         if (!connected) {
             this.role = "none";
-            this.showToast("Could not connect to Host. Check IP/Port or firewall.");
+            this.showToast("Could not connect to Host. Check Join Code or Steam Lobby.");
             throw new Error("Could not connect to Host");
         }
 
         // Send HELLO handshake to Host
         const local = this.getLocalPlayerInfo();
-        this.sendToHost({
-            type: "HELLO",
-            playerId: local.id,
-            name: local.name,
-            version: METADATA.version,
-        });
+        const sendHello = () => {
+            if (this.role !== "client" || this.clientWorldLoaded) return;
+            this.logInfo(`Sending HELLO to Host via ${this.clientTransport}`);
+            this.sendToHost({
+                type: "HELLO",
+                playerId: local.id,
+                name: local.name,
+                version: METADATA.version,
+            });
+        };
+        sendHello();
+
+        // Retry HELLO up to 4 times over Steam P2P until WELCOME_WORLD arrives (handles initial Steam Relay circuit setup)
+        if (this.clientTransport === "steam-p2p") {
+            let retries = 0;
+            this.clientHelloTimer = setInterval(() => {
+                retries++;
+                if (this.role !== "client" || this.clientWorldLoaded || retries > 4) {
+                    clearInterval(this.clientHelloTimer);
+                    this.clientHelloTimer = null;
+                    return;
+                }
+                sendHello();
+            }, 1500);
+        }
 
         this.showToast("Connected to Host! Synchronizing factory world...");
     }
 
     async stopSession(notifyUser = true) {
+        if (this.clientHelloTimer) {
+            clearInterval(this.clientHelloTimer);
+            this.clientHelloTimer = null;
+        }
         if (this.role === "host") {
             try {
                 await ipcRenderer.invoke("mp:net:host-stop");
@@ -915,26 +827,15 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             } catch (e) {}
         }
 
-        for (const [, peer] of this.peers) {
-            if (peer.rtcPc) {
-                try {
-                    peer.rtcPc.close();
-                } catch (e) {}
-            }
-        }
-        if (this.clientRtcPc) {
-            try {
-                this.clientRtcPc.close();
-            } catch (e) {}
-            this.clientRtcPc = null;
-            this.clientRtcDc = null;
-        }
-
         this.peers.clear();
         this.remotePlayers.clear();
         this.clientChunkBuffer.clear();
         this.pendingActionsQueue = [];
         this.activeCoopSavegame = null;
+        this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
+        this.lastCursorStateKey = "";
         this.role = "none";
         this.lobbyId = "";
         this.joinCode = "";
@@ -961,8 +862,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 name: "Player " + (this.peers.size + 2),
                 color: PLAYER_COLORS[colorIdx],
                 transport,
-                rtcPc: null,
-                rtcDc: null,
                 ready: false,
             };
             this.peers.set(peerId, peer);
@@ -992,7 +891,14 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
     onClientDisconnected() {
         if (this.role !== "client") return;
+        if (this.clientHelloTimer) {
+            clearInterval(this.clientHelloTimer);
+            this.clientHelloTimer = null;
+        }
         this.role = "none";
+        this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
         this.remotePlayers.clear();
         this.activeCoopSavegame = null;
         if (this.currentHud) {
@@ -1006,8 +912,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (!peer) return;
         if (peer.transport === "tcp") {
             ipcRenderer.invoke("mp:net:host-send", { peerId: peer.peerId, message });
-        } else if (peer.transport === "webrtc" && peer.rtcDc && peer.rtcDc.readyState === "open") {
-            peer.rtcDc.send(JSON.stringify(message));
         } else if (peer.steamId) {
             ipcRenderer.invoke("steam:mp:send-friend-signal", {
                 friendSteamId: peer.steamId,
@@ -1049,12 +953,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (this.role !== "client") return;
         if (this.clientTransport === "tcp") {
             ipcRenderer.invoke("mp:net:client-send", { message });
-        } else if (
-            this.clientTransport === "webrtc" &&
-            this.clientRtcDc &&
-            this.clientRtcDc.readyState === "open"
-        ) {
-            this.clientRtcDc.send(JSON.stringify(message));
         } else if (this.hostSteamId) {
             ipcRenderer.invoke("steam:mp:send-friend-signal", {
                 friendSteamId: this.hostSteamId,
@@ -1106,9 +1004,35 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
         switch (msg.type) {
             case "HELLO": {
-                peer.playerId = msg.playerId || peerId;
-                peer.name = msg.name || peer.name;
+                const now = performance.now();
+                if (peer.ready && peer.lastWelcomeSentAt && now - peer.lastWelcomeSentAt < 8000) {
+                    break;
+                }
+                const hostLocal = this.getLocalPlayerInfo();
+                let resolvedId = msg.playerId || peerId;
+                let resolvedName = msg.name || peer.name;
+
+                // Disambiguate if connecting from a second instance on the same Steam account (or duplicate ID)
+                let collision = resolvedId === hostLocal.id;
+                if (!collision) {
+                    for (const [otherPeerId, otherPeer] of this.peers) {
+                        if (otherPeerId !== peerId && otherPeer.playerId === resolvedId) {
+                            collision = true;
+                            break;
+                        }
+                    }
+                }
+                if (collision) {
+                    resolvedId = `${resolvedId}_${peerId}`;
+                    if (resolvedName === hostLocal.name) {
+                        resolvedName = `${resolvedName} (2)`;
+                    }
+                }
+
+                peer.playerId = resolvedId;
+                peer.name = resolvedName;
                 peer.ready = true;
+                peer.lastWelcomeSentAt = now;
 
                 this.remotePlayers.set(peer.playerId, {
                     id: peer.playerId,
@@ -1124,7 +1048,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     variant: null,
                     rotation: 0,
                     rotationVariant: 0,
-                    lastUpdate: performance.now(),
+                    lastUpdate: now,
                 });
 
                 this.sendWorldWelcomeToPeer(peer);
@@ -1212,6 +1136,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 type: "WELCOME_WORLD",
                 hostId: local.id,
                 hostName: local.name,
+                assignedPlayerId: peer.playerId,
+                assignedPlayerName: peer.name,
                 assignedColor: peer.color,
                 mode: this.mode,
                 roster: this.buildRosterPayload(),
@@ -1224,6 +1150,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
     onClientReceivedMessage(msg) {
         if (!msg || !msg.type) return;
+
+        if (this.clientHelloTimer) {
+            clearInterval(this.clientHelloTimer);
+            this.clientHelloTimer = null;
+        }
 
         if (msg.type === "CHUNK_PART") {
             let entry = this.clientChunkBuffer.get(msg.transferId);
@@ -1254,6 +1185,18 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
         switch (msg.type) {
             case "WELCOME_WORLD": {
+                this.clientWorldLoaded = true;
+                if (this.clientHelloTimer) {
+                    clearInterval(this.clientHelloTimer);
+                    this.clientHelloTimer = null;
+                }
+                this.logInfo(`Received WELCOME_WORLD from Host (${msg.hostName || msg.hostId})`);
+                if (msg.assignedPlayerId) {
+                    this.assignedPlayerId = msg.assignedPlayerId;
+                }
+                if (msg.assignedPlayerName) {
+                    this.assignedPlayerName = msg.assignedPlayerName;
+                }
                 this.assignedColor = msg.assignedColor || PLAYER_COLORS[1];
                 this.mode = msg.mode || "coop";
                 if (Array.isArray(msg.roster)) {
@@ -1789,6 +1732,27 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
     broadcastLocalCursorState(root) {
         if (!root || !root.camera || !root.app?.mousePosition) return;
+        if (this.role === "client" && !this.clientWorldLoaded) return;
+        if (this.role === "host") {
+            let hasReadyPeer = false;
+            for (const [, p] of this.peers) {
+                if (p.ready) {
+                    hasReadyPeer = true;
+                    break;
+                }
+            }
+            if (!hasReadyPeer) return;
+        }
+
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const isRelay =
+            (this.role === "client" && this.clientTransport === "steam-relay") ||
+            (this.role === "host" &&
+                Array.from(this.peers.values()).some(p => p.ready && p.transport === "steam-relay"));
+        if (isRelay && now - (this.lastCursorSentAt || 0) < 350) {
+            return;
+        }
+
         const worldPos = root.camera.screenToWorld(root.app.mousePosition);
         const placer = root.hud?.parts?.buildingPlacer;
         const metaBuilding = placer?.currentMetaBuilding?.get();
@@ -1816,15 +1780,25 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             }
         }
 
+        const rx = Math.round(worldPos.x * 10) / 10;
+        const ry = Math.round(worldPos.y * 10) / 10;
+        const layer = root.currentLayer || "regular";
+        const stateKey = `${rx},${ry},${layer},${buildingId || ""},${variant || ""},${rotation},${rotationVariant}`;
+        if (this.lastCursorStateKey === stateKey && now - (this.lastCursorSentAt || 0) < 3000) {
+            return;
+        }
+        this.lastCursorStateKey = stateKey;
+        this.lastCursorSentAt = now;
+
         const local = this.getLocalPlayerInfo();
         this.dispatchNetworkAction({
             type: "CURSOR",
             playerId: local.id,
             name: local.name,
             color: local.color,
-            x: Math.round(worldPos.x * 10) / 10,
-            y: Math.round(worldPos.y * 10) / 10,
-            layer: root.currentLayer || "regular",
+            x: rx,
+            y: ry,
+            layer,
             buildingId,
             variant,
             rotation,
@@ -2267,9 +2241,12 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     <div class="mpModalCol">
                         <div class="mpFriendsHeader">
                             <h3>3. Steam Friends (${friends.length})</h3>
-                            <button class="styledButton mpOpenOverlayBtn">Steam Overlay</button>
+                            <div class="mpFriendBtns">
+                                <button class="styledButton mpViewLogsBtn" title="View Co-op Diagnostic Logs">Logs</button>
+                                <button class="styledButton mpOpenOverlayBtn">Steam Overlay</button>
+                            </div>
                         </div>
-                        <p class="mpColDesc">Invite Steam friends or join a friend currently hosting shapez Co-op:</p>
+                        <p class="mpColDesc">Invite Steam friends or join a friend currently playing shapez:</p>
                         <div class="mpFriendsList">
                             ${
                                 friends.length === 0
@@ -2277,19 +2254,23 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                                     : friends
                                           .map(f => {
                                               const isHosting = Boolean(f.mpEndpoint || f.mpLobby);
+                                              const isPlaying = Boolean(f.isPlayingShapez);
+                                              const canJoin = isHosting || isPlaying;
                                               return `
-                                                <div class="mpFriendRow ${isHosting ? "hosting" : ""}">
+                                                <div class="mpFriendRow ${canJoin ? "hosting" : ""}">
                                                     <div class="mpFriendInfo">
                                                         <strong>${escapeHtml(f.name)}</strong>
                                                         <span class="mpFriendSub">${
                                                             isHosting
                                                                 ? "Hosting shapez Co-op!"
+                                                                : isPlaying
+                                                                ? "Playing shapez"
                                                                 : "Steam Friend"
                                                         }</span>
                                                     </div>
                                                     <div class="mpFriendBtns">
                                                         ${
-                                                            isHosting
+                                                            canJoin
                                                                 ? `<button class="styledButton mpJoinFriendBtn" data-steamid="${escapeHtml(
                                                                       f.steamId
                                                                   )}" data-endpoint="${escapeHtml(
@@ -2349,6 +2330,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             joinCodeInput.addEventListener("keydown", ev => {
                 ev.stopPropagation();
                 if (ev.key === "Enter") triggerJoin();
+            });
+        }
+
+        const viewLogsBtn = overlay.querySelector(".mpViewLogsBtn");
+        if (viewLogsBtn) {
+            viewLogsBtn.addEventListener("click", () => {
+                this.openLogsModal();
             });
         }
 
@@ -2412,6 +2400,52 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     hostSteamId: friendSteamId,
                 });
             });
+        });
+    }
+
+    async openLogsModal() {
+        let logData = { logFilePath: "%APPDATA%\\shapez.io\\coop-multiplayer.log", lines: [] };
+        if (typeof ipcRenderer !== "undefined") {
+            try {
+                const res = await ipcRenderer.invoke("steam:mp:get-logs");
+                if (res) logData = res;
+            } catch (e) {}
+        }
+        const logText = (logData.lines || []).join("\n") || "No log entries recorded yet.";
+        const existing = document.querySelector(".mpLogsModalBackdrop");
+        if (existing) existing.remove();
+
+        const modal = document.createElement("div");
+        modal.className = "mpModalBackdrop mpLogsModalBackdrop";
+        modal.innerHTML = `
+            <div class="mpModalCard">
+                <div class="mpModalHeader">
+                    <div>
+                        <h2>Co-op Diagnostic Logs</h2>
+                        <div class="mpSubHeader">
+                            <span>Log file: <code>${escapeHtml(logData.logFilePath || "")}</code></span>
+                        </div>
+                    </div>
+                    <button class="mpCloseModalBtn" aria-label="Close">&times;</button>
+                </div>
+                <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;max-height:360px;overflow:auto;font-size:11px;line-height:1.45;user-select:text;-webkit-user-select:text;">${escapeHtml(
+                    logText
+                )}</pre>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+                    <button class="styledButton mpCopyLogsBtn">Copy Logs to Clipboard</button>
+                    <button class="styledButton mpCloseLogsBtn">Close</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        modal.querySelector(".mpCloseModalBtn").addEventListener("click", close);
+        modal.querySelector(".mpCloseLogsBtn").addEventListener("click", close);
+        modal.querySelector(".mpCopyLogsBtn").addEventListener("click", () => {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(logText).catch(() => {});
+            }
+            this.showToast("Copied diagnostic logs to clipboard!");
         });
     }
 

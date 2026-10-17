@@ -549,9 +549,69 @@ async function verifyMainProcessAndModEndToEnd() {
     console.log("   [PASS] Bidirectional Action Sync (Place, Delete, Upgrades, Hub Goals, Cursors, Pings) verified.");
 }
 
+async function verifySteamLobbySignalingAndNoChatSpam() {
+    console.log("3. Verifying Native Steamworks P2P bridge, Steam Lobby validation, and zero Friends Chat spam...");
+    const bridge = require("../src/steam_bridge");
+
+    // 1. Ensure steam_bridge.js never calls replyToFriendMessage (no Steam Friends Chat spam)
+    const bridgeSource = fs.readFileSync(path.resolve(__dirname, "..", "src", "steam_bridge.js"), "utf8");
+    assert(
+        !bridgeSource.includes("replyToFriendMessage("),
+        "steam_bridge.js must never call greenworks.replyToFriendMessage (no Steam chat spam)"
+    );
+
+    // 2. Verify native Steamworks P2P addon (steam_p2p_win64.node) exists, loads in Node, and exports all required methods
+    const p2pNodePath = path.resolve(__dirname, "..", "src", "steam_p2p_win64.node");
+    assert(fs.existsSync(p2pNodePath), "src/steam_p2p_win64.node must exist");
+    const p2pAddon = bridge.loadNativeSteamP2P();
+    assert(p2pAddon, "loadNativeSteamP2P() must load steam_p2p_win64.node");
+    for (const fn of ["init", "sendP2PPacket", "readP2PPacket", "acceptP2PSession", "requestFriendRichPresence", "requestLobbyData"]) {
+        assert.strictEqual(typeof p2pAddon[fn], "function", `steam_p2p_win64.node must export ${fn}()`);
+    }
+
+    // 3. Verify 64-bit SteamID buffer conversion
+    const idBuf = bridge.steamIdToBuffer8("76561198242237346");
+    assert(Buffer.isBuffer(idBuf) && idBuf.length === 8, "steamIdToBuffer8 must return an 8-byte Buffer");
+    assert.strictEqual(idBuf.readBigUInt64LE(0).toString(), "76561198242237346", "steamIdToBuffer8 must preserve exact uint64 LE value");
+    assert.strictEqual(bridge.steamIdToBuffer8("invalid"), null, "steamIdToBuffer8 must reject non-SteamID strings");
+
+    // 4. Verify isRealSteamLobbyId rejects 20-digit SteamAPICall_t handles and accepts real Steam Lobby IDs
+    assert.strictEqual(
+        bridge.isRealSteamLobbyId("15908673744893694395"),
+        false,
+        "20-digit SteamAPICall_t handle must be rejected by isRealSteamLobbyId"
+    );
+    assert.strictEqual(
+        bridge.isRealSteamLobbyId("76561198257732300"),
+        false,
+        "User SteamID64 must be rejected by isRealSteamLobbyId"
+    );
+    assert.strictEqual(
+        bridge.isRealSteamLobbyId("109775244914473292"),
+        true,
+        "Real 18-digit Steam Lobby ID must be accepted by isRealSteamLobbyId"
+    );
+
+    // 5. Verify compressed Lobby Window round-trip fallback
+    const sampleWindow = {
+        from: "76561198242237346",
+        ack: 4,
+        items: [
+            { seq: 5, data: { kind: "STEAM_PACKET", packet: { type: "HELLO", playerId: "76561198242237346" } } },
+        ],
+    };
+    const encoded = bridge.encodeLobbyWindow(sampleWindow);
+    assert(encoded.startsWith("Z:"), "Lobby window should be zlib-compressed with Z: prefix");
+    const decoded = bridge.decodeLobbyWindow(encoded);
+    assert.deepStrictEqual(decoded, sampleWindow, "decodeLobbyWindow must losslessly restore compressed window");
+
+    console.log("   [PASS] Native Steamworks P2P bridge, Lobby ID validation, and zero Friends Chat spam verified.");
+}
+
 async function main() {
     await verifyAsarIntegrity();
     await verifyMainProcessAndModEndToEnd();
+    await verifySteamLobbySignalingAndNoChatSpam();
     console.log("\nALL VERIFICATION CHECKS PASSED SUCCESSFULLY!");
 }
 
