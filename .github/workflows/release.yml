@@ -21,11 +21,17 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Determine Release Version
+        id: release_version
+        run: node scripts/get-next-version.js
 
       - name: Setup MSBuild / csc
         uses: microsoft/setup-msbuild@v2
@@ -48,27 +54,12 @@ jobs:
             dist/shapez-steam-coop-mod-*.zip
             dist/SHA256SUMS.txt
 
-      # Permanent Versioned Release for Git Tags (e.g. v1.0.0)
-      - name: Publish Versioned Milestone Release
+      # Publish Official Release (Automated patch bump on master, or specific tag on v* push)
+      - name: Publish Official Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: "shapez Steam Co-op Mod ${{ github.ref_name }}"
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            dist/ShapezCoopInstaller.exe
-            dist/shapez-steam-coop-mod-*.zip
-            dist/SHA256SUMS.txt
-
-      # Automatic Latest Release for Commits to master
-      - name: Publish Latest Stable Release (master)
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/master'
-        with:
-          tag_name: latest
-          name: "shapez Steam Co-op Mod (Latest)"
+          tag_name: ${{ steps.release_version.outputs.RELEASE_TAG }}
+          name: ${{ steps.release_version.outputs.RELEASE_NAME }}
           draft: false
           prerelease: false
           make_latest: true
