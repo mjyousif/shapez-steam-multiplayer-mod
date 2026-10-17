@@ -121,12 +121,47 @@ class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPar
 
         const collapseBtn = this.container.querySelector(".mpCollapseBtn");
         const header = this.container.querySelector(".mpHudHeader");
+        const body = this.container.querySelector(".mpHudBody");
+        const rosterEl = this.container.querySelector(".mpRoster");
+        const chatMessagesEl = this.container.querySelector(".mpChatMessages");
         const inviteBtn = this.container.querySelector(".mpBtnInvite");
         const copyBtn = this.container.querySelector(".mpBtnCopyCode");
         const pingBtn = this.container.querySelector(".mpBtnPing");
         const resyncBtn = this.container.querySelector(".mpBtnResync");
         const chatInput = this.container.querySelector(".mpChatInput");
         const chatSendBtn = this.container.querySelector(".mpChatSendBtn");
+
+        // Prevent mouse clicks in the HUD body from bubbling to the canvas/window
+        if (body) {
+            body.addEventListener("mousedown", ev => {
+                ev.stopPropagation();
+            });
+        }
+
+        // Enable smooth mouse wheel scrolling in all scrollable HUD regions
+        // and stop propagation to prevent wheel events from zooming the game map underneath
+        const makeScrollable = el => {
+            if (!el) return;
+            el.addEventListener(
+                "wheel",
+                ev => {
+                    ev.stopPropagation();
+                    el.scrollTop += ev.deltaY;
+                },
+                { passive: false }
+            );
+        };
+        makeScrollable(rosterEl);
+        makeScrollable(chatMessagesEl);
+        makeScrollable(body);
+
+        this.container.addEventListener(
+            "wheel",
+            ev => {
+                ev.stopPropagation();
+            },
+            { passive: false }
+        );
 
         // Allow dragging HUD panel anywhere on screen
         if (header) {
@@ -2298,6 +2333,40 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         document.body.appendChild(overlay);
         this.modalEl = overlay;
 
+        // Isolate mousedown and wheel events from the game canvas underneath
+        const modalCard = overlay.querySelector(".mpModalCard");
+        const friendsList = overlay.querySelector(".mpFriendsList");
+        if (modalCard) {
+            modalCard.addEventListener("mousedown", ev => {
+                ev.stopPropagation();
+            });
+            modalCard.addEventListener(
+                "wheel",
+                ev => {
+                    ev.stopPropagation();
+                    modalCard.scrollTop += ev.deltaY;
+                },
+                { passive: false }
+            );
+        }
+        if (friendsList) {
+            friendsList.addEventListener(
+                "wheel",
+                ev => {
+                    ev.stopPropagation();
+                    friendsList.scrollTop += ev.deltaY;
+                },
+                { passive: false }
+            );
+        }
+        overlay.addEventListener(
+            "wheel",
+            ev => {
+                ev.stopPropagation();
+            },
+            { passive: false }
+        );
+
         overlay.querySelector(".mpCloseModalBtn").addEventListener("click", () => this.closeMultiplayerModal());
         overlay.addEventListener("click", ev => {
             if (ev.target === overlay) this.closeMultiplayerModal();
@@ -2324,6 +2393,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (joinByCodeBtn && joinCodeInput) {
             const triggerJoin = () => {
                 const val = joinCodeInput.value.trim() || "127.0.0.1:27080";
+                this.closeMultiplayerModal();
                 this.joinByCodeOrAddress(val);
             };
             joinByCodeBtn.addEventListener("click", triggerJoin);
@@ -2439,6 +2509,28 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         `;
         document.body.appendChild(modal);
         const close = () => modal.remove();
+        const pre = modal.querySelector("pre");
+        if (pre) {
+            pre.addEventListener(
+                "wheel",
+                ev => {
+                    ev.stopPropagation();
+                    pre.scrollTop += ev.deltaY;
+                },
+                { passive: false }
+            );
+        }
+        modal.addEventListener(
+            "wheel",
+            ev => {
+                ev.stopPropagation();
+            },
+            { passive: false }
+        );
+        modal.querySelector(".mpModalCard")?.addEventListener("mousedown", ev => {
+            ev.stopPropagation();
+        });
+
         modal.querySelector(".mpCloseModalBtn").addEventListener("click", close);
         modal.querySelector(".mpCloseLogsBtn").addEventListener("click", close);
         modal.querySelector(".mpCopyLogsBtn").addEventListener("click", () => {
@@ -2805,15 +2897,25 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 position: absolute;
                 top: 70px;
                 right: 16px;
-                width: 300px;
-                background: rgba(17, 24, 39, 0.94);
+                width: 290px;
+                max-height: calc(100vh - 90px);
+                display: flex;
+                flex-direction: column;
+                background: rgba(15, 23, 42, 0.95);
                 border: 1.5px solid rgba(102, 192, 244, 0.65);
-                border-radius: 7px;
+                border-radius: 8px;
                 color: #f3f4f6;
                 font-family: GameFont, sans-serif;
                 z-index: 900;
                 pointer-events: all;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+                box-sizing: border-box;
+                overflow: hidden;
+            }
+            #ingame_HUD_Multiplayer.mpHudPanel.collapsed {
+                max-height: none;
             }
             #ingame_HUD_Multiplayer.mpHudPanel.collapsed .mpHudBody {
                 display: none;
@@ -2822,20 +2924,23 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                padding: 6px 10px;
+                padding: 7px 10px;
                 background: rgba(30, 41, 59, 0.95);
+                border-bottom: 1px solid rgba(102, 192, 244, 0.25);
                 border-radius: 6px 6px 0 0;
                 font-size: 12px;
                 font-weight: bold;
                 cursor: move;
                 user-select: none;
                 -webkit-user-select: none;
+                flex: 0 0 auto;
             }
             .mpStatusDot {
                 width: 8px;
                 height: 8px;
                 border-radius: 50%;
                 background: #9ca3af;
+                flex-shrink: 0;
             }
             .mpStatusDot.online {
                 background: #4ade80;
@@ -2844,6 +2949,9 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             .mpHeaderTitle {
                 flex: 1;
                 color: #66c0f4;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .mpPlayerCountBadge {
                 background: #2563eb;
@@ -2851,6 +2959,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 border-radius: 10px;
                 padding: 1px 7px;
                 font-size: 11px;
+                flex-shrink: 0;
             }
             .mpCollapseBtn {
                 background: transparent;
@@ -2859,56 +2968,95 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 cursor: pointer;
                 font-size: 14px;
                 font-weight: bold;
+                padding: 0 4px;
+                line-height: 1;
+            }
+            .mpCollapseBtn:hover {
+                color: #ffffff;
             }
             .mpHudBody {
                 padding: 8px 10px;
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
+                overflow-y: auto;
+                overflow-x: hidden;
+                box-sizing: border-box;
+                flex: 1 1 auto;
+                min-height: 0;
             }
             .mpRoster {
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
-                max-height: 95px;
+                max-height: 90px;
                 overflow-y: auto;
+                overflow-x: hidden;
+                box-sizing: border-box;
+                padding-right: 2px;
+                flex-shrink: 0;
             }
             .mpRosterItem {
                 display: flex;
                 align-items: center;
-                gap: 6px;
+                gap: 8px;
                 font-size: 11px;
-                background: rgba(30, 41, 59, 0.65);
-                padding: 3px 6px;
+                background: rgba(30, 41, 59, 0.75);
+                border: 1px solid rgba(100, 116, 139, 0.25);
+                padding: 4px 8px;
                 border-radius: 4px;
+                box-sizing: border-box;
+                min-height: 25px;
             }
             .mpColorSwatch {
                 width: 9px;
                 height: 9px;
                 border-radius: 50%;
+                flex-shrink: 0;
             }
             .mpRosterName {
                 flex: 1;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                font-size: 11px;
             }
             .mpRosterRole {
                 font-size: 9px;
                 color: #93c5fd;
-                background: rgba(37, 99, 235, 0.25);
+                background: rgba(37, 99, 235, 0.3);
                 padding: 1px 5px;
                 border-radius: 3px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                flex-shrink: 0;
             }
             .mpActionRow {
-                display: flex;
-                gap: 5px;
-                flex-wrap: wrap;
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+                gap: 6px !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+                flex-shrink: 0;
             }
             .mpActionRow .styledButton {
+                box-sizing: border-box !important;
+                height: 28px !important;
+                min-height: 28px !important;
+                max-height: 28px !important;
+                padding: 0 6px !important;
                 font-size: 10px !important;
-                padding: 4px 7px !important;
-                flex: 1;
+                line-height: 26px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                text-align: center !important;
+                white-space: nowrap !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+                margin: 0 !important;
+                border-radius: 4px !important;
+                cursor: pointer !important;
             }
             .mpChatBox {
                 display: flex;
@@ -2918,15 +3066,26 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 padding-top: 6px;
                 box-sizing: border-box;
                 width: 100%;
+                flex-shrink: 0;
             }
             .mpChatMessages {
-                max-height: 75px;
+                height: 80px;
+                max-height: 110px;
                 overflow-y: auto;
+                overflow-x: hidden;
                 font-size: 11px;
                 display: flex;
                 flex-direction: column;
-                gap: 2px;
+                gap: 3px;
                 word-break: break-word;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(51, 65, 85, 0.6);
+                border-radius: 4px;
+                padding: 5px 7px;
+                box-sizing: border-box;
+            }
+            .mpChatLine {
+                line-height: 1.35;
             }
             .mpChatLine.mpSystemMsg .mpSysText {
                 color: #93c5fd;
@@ -2944,14 +3103,14 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 min-width: 0 !important;
                 width: auto !important;
                 height: 28px !important;
-                line-height: 18px !important;
+                line-height: 26px !important;
                 margin: 0 !important;
                 background: #0f172a !important;
                 background-color: #0f172a !important;
                 color: #ffffff !important;
                 border: 1px solid #334155 !important;
                 border-radius: 4px !important;
-                padding: 4px 8px !important;
+                padding: 0 8px !important;
                 font-size: 11px !important;
                 box-sizing: border-box !important;
                 display: block !important;
@@ -2959,17 +3118,46 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 -webkit-user-select: text !important;
                 pointer-events: all !important;
             }
+            .mpChatInput:focus {
+                border-color: #38bdf8 !important;
+                outline: none !important;
+            }
             .mpChatSendBtn {
                 flex: 0 0 auto !important;
                 height: 28px !important;
-                line-height: 18px !important;
+                min-height: 28px !important;
+                max-height: 28px !important;
+                line-height: 26px !important;
                 margin: 0 !important;
                 font-size: 10px !important;
-                padding: 4px 10px !important;
+                padding: 0 12px !important;
                 box-sizing: border-box !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
+                border-radius: 4px !important;
+                cursor: pointer !important;
+            }
+
+            /* Dedicated Clean Scrollbars inside HUD Panel & Modals */
+            .mpHudPanel ::-webkit-scrollbar,
+            .mpModalCard ::-webkit-scrollbar {
+                width: 5px !important;
+                height: 5px !important;
+            }
+            .mpHudPanel ::-webkit-scrollbar-track,
+            .mpModalCard ::-webkit-scrollbar-track {
+                background: rgba(15, 23, 42, 0.4) !important;
+                border-radius: 3px !important;
+            }
+            .mpHudPanel ::-webkit-scrollbar-thumb,
+            .mpModalCard ::-webkit-scrollbar-thumb {
+                background: #475569 !important;
+                border-radius: 3px !important;
+            }
+            .mpHudPanel ::-webkit-scrollbar-thumb:hover,
+            .mpModalCard ::-webkit-scrollbar-thumb:hover {
+                background: #64748b !important;
             }
 
             /* Toast & Invite Banner */
