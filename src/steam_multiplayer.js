@@ -392,6 +392,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.lastCursorStateKey = "";
         this.lastCursorSentAt = 0;
         this.clientHelloTimer = null;
+        this.isConnecting = false;
+        this.joinOverlayEl = null;
 
         this.injectStyles();
         this.setupIpcListeners();
@@ -424,6 +426,10 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
         this.signals.stateEntered.add(state => {
             if (state && state.key === "MainMenuState") {
+                if (this.isSessionActive() && !this.isConnecting) {
+                    this.logInfo("Returned to Main Menu from active game - terminating background multiplayer session.");
+                    this.stopSession(false);
+                }
                 this.enhanceMainMenu(state);
                 setTimeout(() => this.enhanceMainMenu(state), 40);
                 setTimeout(() => this.enhanceMainMenu(state), 200);
@@ -698,6 +704,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     async joinSteamLobby(lobbyId, hostFriendSteamId = "") {
         try {
             this.showToast("Joining Steam Co-op Lobby...");
+            this.showJoinProgressModal("Joining Steam Co-op Lobby...");
             const joinArg = hostFriendSteamId ? { lobbyId, hostSteamId: hostFriendSteamId } : lobbyId;
             const info = await ipcRenderer.invoke("steam:mp:join-lobby", joinArg);
             const endpointsStr = info.endpoints || "";
@@ -711,9 +718,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     alreadyJoinedLobby: true,
                 });
             } else {
+                this.isConnecting = false;
+                this.closeJoinProgressModal();
                 this.showToast("Could not resolve host address from lobby. Try using Join Code or IP:Port.");
             }
         } catch (err) {
+            this.isConnecting = false;
+            this.closeJoinProgressModal();
             this.logWarn("Failed to join Steam lobby: " + (err.message || err));
             this.showToast("Failed to join Steam Lobby: " + (err.message || err));
         }
@@ -732,16 +743,24 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 endpoints.unshift(direct);
             }
         }
-        await this.connectToHost({
-            endpoints,
-            lobbyId: decoded.lobbyId,
-            hostSteamId: decoded.hostSteamId,
-        });
+        try {
+            await this.connectToHost({
+                endpoints,
+                lobbyId: decoded.lobbyId,
+                hostSteamId: decoded.hostSteamId,
+            });
+        } catch (err) {
+            this.isConnecting = false;
+            this.closeJoinProgressModal();
+        }
     }
 
     async connectToHost({ endpoints = [], lobbyId = "", hostSteamId = "", alreadyJoinedLobby = false }) {
         await this.stopSession(false);
         await this.refreshSteamStatus();
+
+        this.isConnecting = true;
+        this.showJoinProgressModal("Connecting to Host...");
 
         this.role = "client";
         this.lobbyId = lobbyId;
@@ -784,6 +803,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             if (isRemoteSteamHost && isLoopback) continue;
             const tcpTimeout = isRemoteSteamHost ? 1200 : 3000;
             try {
+                this.updateJoinProgressModal(`Connecting to ${host}:${port}...`);
                 this.showToast(`Connecting to ${host}:${port}...`);
                 await ipcRenderer.invoke("mp:net:client-connect", {
                     host,
@@ -805,10 +825,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             this.clientTransport = "steam-p2p";
             if (!this.hostSteamId) this.hostSteamId = "host";
             connected = true;
+            this.updateJoinProgressModal("Negotiating Steamworks P2P connection...");
             this.logInfo(`Connecting to Host ${this.hostSteamId} via Native Steam P2P`);
         }
 
         if (!connected) {
+            this.isConnecting = false;
+            this.closeJoinProgressModal();
             this.role = "none";
             this.showToast("Could not connect to Host. Check Join Code or Steam Lobby.");
             throw new Error("Could not connect to Host");
@@ -842,6 +865,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             }, 1500);
         }
 
+        this.updateJoinProgressModal("Connected! Synchronizing factory world...");
         this.showToast("Connected to Host! Synchronizing factory world...");
     }
 
@@ -850,34 +874,39 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             clearInterval(this.clientHelloTimer);
             this.clientHelloTimer = null;
         }
-        if (this.role === "host") {
+        this.isConnecting = false;
+        this.closeJoinProgressModal();
+
+        const prevRole = this.role;
+        this.role = "none";
+        this.activeCoopSavegame = null;
+        this.clientWorldLoaded = false;
+        this.assignedPlayerId = "";
+        this.assignedPlayerName = "";
+        this.lastCursorStateKey = "";
+        this.lobbyId = "";
+        this.joinCode = "";
+        this.peers.clear();
+        this.remotePlayers.clear();
+        this.clientChunkBuffer.clear();
+        this.pendingActionsQueue = [];
+
+        if (this.currentHud) {
+            this.currentHud.refreshUI();
+        }
+
+        if (prevRole === "host") {
             try {
                 await ipcRenderer.invoke("mp:net:host-stop");
                 await ipcRenderer.invoke("steam:mp:leave-lobby");
             } catch (e) {}
-        } else if (this.role === "client") {
+        } else if (prevRole === "client") {
             try {
                 await ipcRenderer.invoke("mp:net:client-disconnect");
                 await ipcRenderer.invoke("steam:mp:leave-lobby");
             } catch (e) {}
         }
 
-        this.peers.clear();
-        this.remotePlayers.clear();
-        this.clientChunkBuffer.clear();
-        this.pendingActionsQueue = [];
-        this.activeCoopSavegame = null;
-        this.clientWorldLoaded = false;
-        this.assignedPlayerId = "";
-        this.assignedPlayerName = "";
-        this.lastCursorStateKey = "";
-        this.role = "none";
-        this.lobbyId = "";
-        this.joinCode = "";
-
-        if (this.currentHud) {
-            this.currentHud.refreshUI();
-        }
         if (notifyUser) {
             this.showToast("Disconnected from Co-op session.");
         }
@@ -930,6 +959,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             clearInterval(this.clientHelloTimer);
             this.clientHelloTimer = null;
         }
+        this.isConnecting = false;
+        this.closeJoinProgressModal();
         this.role = "none";
         this.clientWorldLoaded = false;
         this.assignedPlayerId = "";
@@ -1205,7 +1236,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 entry.chunks[msg.index] = msg.data;
                 entry.received++;
             }
+            const pct = Math.round((entry.received / entry.total) * 100);
+            this.updateJoinProgressModal(
+                `Downloading factory snapshot: ${pct}% (${entry.received}/${entry.total} chunks)...`,
+                pct
+            );
             if (entry.received >= entry.total) {
+                this.updateJoinProgressModal("Factory snapshot received! Reconstructing world...", 100);
                 this.clientChunkBuffer.delete(msg.transferId);
                 try {
                     const fullJson = entry.chunks.join("");
@@ -1226,6 +1263,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     this.clientHelloTimer = null;
                 }
                 this.logInfo(`Received WELCOME_WORLD from Host (${msg.hostName || msg.hostId})`);
+                this.updateJoinProgressModal("Loading factory world & warming up simulation...", 100);
                 if (msg.assignedPlayerId) {
                     this.assignedPlayerId = msg.assignedPlayerId;
                 }
@@ -1325,6 +1363,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     async loadHostWorldDump(worldDump, hostName) {
         if (!worldDump) return;
         this.closeMultiplayerModal();
+        this.updateJoinProgressModal("Loading factory world & warming up simulation...", 100);
+
+        // Safety timeout to ensure loading overlay never lingers if state transition stalls
+        setTimeout(() => {
+            this.closeJoinProgressModal();
+            this.isConnecting = false;
+        }, 12000);
 
         // Ensure client singleplayer saves are NEVER overwritten:
         // Only reuse activeCoopSavegame if we are already in an active co-op session and resyncing.
@@ -1372,6 +1417,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     // =========================================================================
 
     attachGameRoot(root, hudPart) {
+        this.isConnecting = false;
+        this.closeJoinProgressModal();
         this.currentRoot = root;
         this.currentHud = hudPart;
 
@@ -2115,7 +2162,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     // =========================================================================
 
     enhanceMainMenu(mainMenuState) {
-        const htmlEl = (mainMenuState && mainMenuState.htmlElement) || document.getElementById("state_MainMenuState");
+        const htmlEl =
+            (mainMenuState && mainMenuState.htmlElement) ||
+            (typeof document !== "undefined" && typeof document.getElementById === "function"
+                ? document.getElementById("state_MainMenuState")
+                : null);
         if (!htmlEl) return;
 
         // If multi-instance is active, ensure document title reflects it
@@ -2545,6 +2596,66 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (this.modalEl) {
             this.modalEl.remove();
             this.modalEl = null;
+        }
+    }
+
+    showJoinProgressModal(initialStatus = "Connecting to Host...") {
+        this.closeJoinProgressModal();
+        if (typeof document === "undefined" || !document.body) return;
+        const overlay = document.createElement("div");
+        overlay.className = "mpJoinOverlayBackdrop";
+        overlay.innerHTML = `
+            <div class="mpJoinCard">
+                <div class="mpJoinSpinner"></div>
+                <h3 class="mpJoinTitle">Connecting to Co-op Session</h3>
+                <p class="mpJoinStatus">${escapeHtml(initialStatus)}</p>
+                <div class="mpJoinProgressContainer" style="display: none;">
+                    <div class="mpJoinProgressBar"></div>
+                </div>
+                <button class="styledButton mpCancelJoinBtn">Cancel</button>
+            </div>
+        `;
+        const card = overlay.querySelector ? overlay.querySelector(".mpJoinCard") : null;
+        if (card && typeof card.addEventListener === "function") {
+            card.addEventListener("mousedown", ev => ev.stopPropagation());
+        }
+        const cancelBtn = overlay.querySelector ? overlay.querySelector(".mpCancelJoinBtn") : null;
+        if (cancelBtn && typeof cancelBtn.addEventListener === "function") {
+            cancelBtn.addEventListener("click", async () => {
+                this.logInfo("User cancelled co-op join");
+                this.isConnecting = false;
+                this.closeJoinProgressModal();
+                await this.stopSession(true);
+            });
+        }
+        document.body.appendChild(overlay);
+        this.joinOverlayEl = overlay;
+    }
+
+    updateJoinProgressModal(statusText, progressPercent = null) {
+        if (!this.joinOverlayEl || typeof this.joinOverlayEl.querySelector !== "function") return;
+        const statusEl = this.joinOverlayEl.querySelector(".mpJoinStatus");
+        if (statusEl && statusText) {
+            statusEl.innerText = statusText;
+        }
+        const progContainer = this.joinOverlayEl.querySelector(".mpJoinProgressContainer");
+        const progBar = this.joinOverlayEl.querySelector(".mpJoinProgressBar");
+        if (progContainer && progContainer.style && progBar && progBar.style) {
+            if (typeof progressPercent === "number" && progressPercent >= 0) {
+                progContainer.style.display = "block";
+                progBar.style.width = Math.min(100, Math.max(0, Math.round(progressPercent))) + "%";
+            }
+        }
+    }
+
+    closeJoinProgressModal() {
+        if (this.joinOverlayEl) {
+            try {
+                if (typeof this.joinOverlayEl.remove === "function") {
+                    this.joinOverlayEl.remove();
+                }
+            } catch (e) {}
+            this.joinOverlayEl = null;
         }
     }
 
@@ -3207,6 +3318,84 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             .mpInviteBtns {
                 display: flex;
                 gap: 6px;
+            }
+
+            /* Joining & World Sync Progress Overlay */
+            .mpJoinOverlayBackdrop {
+                position: fixed;
+                inset: 0;
+                background: rgba(10, 15, 25, 0.88);
+                z-index: 100000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: GameFont, sans-serif;
+                backdrop-filter: blur(4px);
+            }
+            .mpJoinCard {
+                width: min(440px, 90vw);
+                background: #1b2838;
+                border: 2px solid #66c0f4;
+                border-radius: 10px;
+                padding: 24px;
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                gap: 12px;
+                color: #e5e7eb;
+                box-sizing: border-box;
+            }
+            .mpJoinSpinner {
+                width: 38px;
+                height: 38px;
+                border: 4px solid rgba(102, 192, 244, 0.2);
+                border-top-color: #66c0f4;
+                border-radius: 50%;
+                animation: mpSpin 0.9s linear infinite;
+            }
+            @keyframes mpSpin {
+                to { transform: rotate(360deg); }
+            }
+            .mpJoinTitle {
+                margin: 0;
+                font-size: 18px;
+                color: #ffffff;
+            }
+            .mpJoinStatus {
+                margin: 0;
+                font-size: 13px;
+                color: #94a3b8;
+                min-height: 20px;
+                word-break: break-word;
+            }
+            .mpJoinProgressContainer {
+                width: 100%;
+                height: 8px;
+                background: #0f172a;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                overflow: hidden;
+                margin-top: 4px;
+                box-sizing: border-box;
+            }
+            .mpJoinProgressBar {
+                height: 100%;
+                width: 0%;
+                background: linear-gradient(90deg, #38bdf8, #4ade80);
+                transition: width 0.2s ease-out;
+            }
+            .mpCancelJoinBtn {
+                margin-top: 8px !important;
+                background: #334155 !important;
+                color: #cbd5e1 !important;
+                font-size: 12px !important;
+                padding: 6px 16px !important;
+            }
+            .mpCancelJoinBtn:hover {
+                background: #475569 !important;
+                color: #ffffff !important;
             }
         `);
     }

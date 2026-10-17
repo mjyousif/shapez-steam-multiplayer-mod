@@ -69,8 +69,9 @@ describe("Client Savegame Isolation", () => {
             replaceMethod: () => {},
         };
 
+        const stateEnteredListeners = [];
         const mockSignals = {
-            stateEntered: { add: () => {} },
+            stateEntered: { add: fn => stateEnteredListeners.push(fn) },
         };
 
         // Minimal shapez globals for mod initialization
@@ -131,13 +132,15 @@ describe("Client Savegame Isolation", () => {
         const mockDocument = {
             body: { appendChild: () => {} },
             querySelector: () => null,
+            getElementById: () => null,
             createElement: () => ({
                 className: "",
                 classList: { add: () => {}, remove: () => {}, toggle: () => {} },
                 addEventListener: () => {},
-                querySelector: () => ({ addEventListener: () => {} }),
+                querySelector: () => ({ addEventListener: () => {}, style: {} }),
                 querySelectorAll: () => [],
                 remove: () => {},
+                style: {},
             }),
         };
 
@@ -210,5 +213,48 @@ describe("Client Savegame Isolation", () => {
         // 3. Disconnect resets activeCoopSavegame
         await modInstance.stopSession(false);
         assert.strictEqual(modInstance.activeCoopSavegame, null, "activeCoopSavegame reset on stopSession");
+
+        // 4. Auto-disconnect when exiting from an active game session to MainMenuState
+        modInstance.role = "client";
+        modInstance.activeCoopSavegame = { id: "active_coop_session" };
+        assert.strictEqual(modInstance.isSessionActive(), true);
+
+        // Trigger MainMenuState entry event
+        for (const listener of stateEnteredListeners) {
+            listener({ key: "MainMenuState" });
+        }
+
+        assert.strictEqual(
+            modInstance.role,
+            "none",
+            "Multiplayer role must reset to 'none' when returning to MainMenuState"
+        );
+        assert.strictEqual(
+            modInstance.activeCoopSavegame,
+            null,
+            "activeCoopSavegame must be cleared when returning to MainMenuState"
+        );
+        assert.strictEqual(
+            modInstance.isSessionActive(),
+            false,
+            "Session must no longer be active after returning to menu"
+        );
+
+        // 5. Join progress overlay displays and cleans up on attachGameRoot
+        modInstance.showJoinProgressModal("Connecting to Host...");
+        assert.ok(modInstance.joinOverlayEl, "joinOverlayEl must be created on showJoinProgressModal");
+        modInstance.updateJoinProgressModal("Downloading snapshot: 50%...", 50);
+
+        modInstance.attachGameRoot({ logicInitialized: true }, {});
+        assert.strictEqual(
+            modInstance.joinOverlayEl,
+            null,
+            "joinOverlayEl must be dismissed when attachGameRoot is called"
+        );
+        assert.strictEqual(
+            modInstance.isConnecting,
+            false,
+            "isConnecting must be reset to false when attachGameRoot is called"
+        );
     });
 });
