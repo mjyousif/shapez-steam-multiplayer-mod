@@ -62,6 +62,16 @@ npm run install-mod
 2. Updates `index.js`, `steam.js`, and `preload.js` inside `app.asar` to enable Steamworks Lobby/Friends IPC and TCP P2P networking.
 3. Copies `src/steam_multiplayer.js` into `%APPDATA%\shapez.io\mods\steam_multiplayer.js`.
 
+### Save Game Safety & Backups
+Your singleplayer save games (`%APPDATA%\shapez.io\saves`) are **100% safe**: neither installing nor uninstalling the mod alters or deletes them.
+
+To create an instant timestamped `.zip` backup of your save files at any time:
+- **GUI Installer**: Click **Backup Saves (.zip)** in `ShapezCoopInstaller.exe` (includes buttons to open saves or backups folders).
+- **CLI**: Run `.\dist\ShapezCoopInstaller.exe --backup`.
+- **npm**: Run `npm run backup-saves`.
+
+Backups are saved directly into `%APPDATA%\shapez.io\backups\`.
+
 ---
 
 ## How to Play Co-op

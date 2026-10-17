@@ -133,7 +133,7 @@ When Player A places a belt:
 
 ## 4. World State Bootstrap & Resync
 
-### 4.1 Initial World Loading (`loadHostWorldDump`)
+### 4.1 Initial World Loading & Savegame Isolation (`loadHostWorldDump`)
 When a client joins an existing session:
 1. The Host serializes the entire current simulation state:
    ```javascript
@@ -141,8 +141,13 @@ When a client joins an existing session:
    const dump = serializer.generateDumpFromGameRoot(this.currentRoot, false);
    ```
 2. The Host sends the serialized dump (chunked in 48 KB packets) via `WELCOME_WORLD`.
-3. The client reconstructs the dump in memory, creates a fresh temporary savegame reference, and loads directly into `InGameState`:
+3. **Savegame Isolation Guarantee**: To prevent overwriting the player's personal singleplayer factory if they joined while already in-game, the mod never mutates `this.currentRoot.savegame`. Instead, it allocates a dedicated new savegame instance (`this.app.savegameMgr.createNewSavegame()`) and tracks it as `this.activeCoopSavegame`:
    ```javascript
+   let savegame = this.activeCoopSavegame;
+   if (!savegame) {
+       savegame = this.app.savegameMgr.createNewSavegame();
+       this.activeCoopSavegame = savegame;
+   }
    savegame.currentData = {
        version: savegame.getCurrentVersion(),
        dump: worldDump,
@@ -150,8 +155,10 @@ When a client joins an existing session:
        lastUpdate: Date.now(),
        mods: shapez.MODS.getModsListForSavegame(),
    };
+   savegame.metaDataRef.name = "Co-op (" + safeHost + ")";
    this.app.stateMgr.moveToState("InGameState", { savegame, fastEnter: true });
    ```
+4. On subsequent on-demand resyncs (`REQUEST_RESYNC`), the mod reuses `this.activeCoopSavegame` rather than spawning duplicate save slots.
 
 ### 4.2 On-Demand Resynchronization (`REQUEST_RESYNC`)
 If a client experiences network packet loss or joins late during a massive blueprint paste:
