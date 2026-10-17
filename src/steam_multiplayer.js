@@ -1004,6 +1004,10 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
         switch (msg.type) {
             case "HELLO": {
+                const now = performance.now();
+                if (peer.ready && peer.lastWelcomeSentAt && now - peer.lastWelcomeSentAt < 8000) {
+                    break;
+                }
                 const hostLocal = this.getLocalPlayerInfo();
                 let resolvedId = msg.playerId || peerId;
                 let resolvedName = msg.name || peer.name;
@@ -1028,6 +1032,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 peer.playerId = resolvedId;
                 peer.name = resolvedName;
                 peer.ready = true;
+                peer.lastWelcomeSentAt = now;
 
                 this.remotePlayers.set(peer.playerId, {
                     id: peer.playerId,
@@ -1043,7 +1048,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     variant: null,
                     rotation: 0,
                     rotationVariant: 0,
-                    lastUpdate: performance.now(),
+                    lastUpdate: now,
                 });
 
                 this.sendWorldWelcomeToPeer(peer);
@@ -1145,6 +1150,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
     onClientReceivedMessage(msg) {
         if (!msg || !msg.type) return;
+
+        if (this.clientHelloTimer) {
+            clearInterval(this.clientHelloTimer);
+            this.clientHelloTimer = null;
+        }
 
         if (msg.type === "CHUNK_PART") {
             let entry = this.clientChunkBuffer.get(msg.transferId);

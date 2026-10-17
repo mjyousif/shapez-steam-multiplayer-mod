@@ -305,11 +305,17 @@ function drainP2PChannel(channel) {
         } catch (e) {}
 
         const dataObj = parsed.kind ? parsed : { kind: "STEAM_PACKET", packet: parsed };
-        if (channel === 0 && (!dataObj.packet || dataObj.packet.type !== "CURSOR")) {
+        const innerPkt = dataObj.packet;
+        const pktType = innerPkt && innerPkt.type ? innerPkt.type : "";
+        const shouldLogRx =
+            channel === 0 &&
+            pktType !== "CURSOR" &&
+            pktType !== "SYNC_HUB" &&
+            (pktType !== "CHUNK_PART" || innerPkt.index === 0 || innerPkt.index === innerPkt.total - 1);
+        if (shouldLogRx) {
+            const chunkSuffix = pktType === "CHUNK_PART" ? ` (${innerPkt.index + 1}/${innerPkt.total})` : "";
             logInfo(
-                `Received Steam P2P packet kind=${dataObj.kind}${
-                    dataObj.packet && dataObj.packet.type ? ":" + dataObj.packet.type : ""
-                } from=${fromName} (${fromId})`
+                `Received Steam P2P packet kind=${dataObj.kind}${pktType ? ":" + pktType : ""}${chunkSuffix} from=${fromName} (${fromId})`
             );
         }
 
@@ -342,22 +348,25 @@ function sendViaSteamP2P(targetSteamId, dataObj) {
 
     ensureP2PSessionAccepted(targetSteamId);
 
-    const isUnreliableCursor =
-        dataObj &&
-        dataObj.kind === "STEAM_PACKET" &&
-        dataObj.packet &&
-        dataObj.packet.type === "CURSOR";
+    const pkt = dataObj && dataObj.packet;
+    const pktType = pkt && pkt.type ? pkt.type : "";
+    const isUnreliableCursor = dataObj && dataObj.kind === "STEAM_PACKET" && pktType === "CURSOR";
     const sendType = isUnreliableCursor ? 0 : 2; // 0 = k_EP2PSendUnreliable, 2 = k_EP2PSendReliable (up to 1MB)
     const channel = isUnreliableCursor ? 1 : 0;
 
     try {
         const payloadBuf = Buffer.from(JSON.stringify(dataObj), "utf8");
         const ok = Boolean(steamP2P.sendP2PPacket(idBuf, payloadBuf, sendType, channel));
-        if (channel === 0) {
+        const shouldLogTx =
+            channel === 0 &&
+            pktType !== "SYNC_HUB" &&
+            (pktType !== "CHUNK_PART" || pkt.index === 0 || pkt.index === pkt.total - 1);
+        if (shouldLogTx) {
+            const chunkSuffix = pktType === "CHUNK_PART" ? ` (${pkt.index + 1}/${pkt.total})` : "";
             logInfo(
                 `Sent Steam P2P packet (${payloadBuf.length}B, ok=${ok}) kind=${dataObj.kind}${
-                    dataObj.packet && dataObj.packet.type ? ":" + dataObj.packet.type : ""
-                } to=${targetSteamId}`
+                    pktType ? ":" + pktType : ""
+                }${chunkSuffix} to=${targetSteamId}`
             );
         }
         return ok;

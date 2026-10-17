@@ -199,7 +199,12 @@ function main() {
     if (fs.existsSync(SOURCE_P2P_NODE)) {
         console.log("[3/4] Installing native Steam P2P bridge to:", TARGET_P2P_NODE);
         fs.mkdirSync(path.dirname(TARGET_P2P_NODE), { recursive: true });
-        fs.copyFileSync(SOURCE_P2P_NODE, TARGET_P2P_NODE);
+        try {
+            fs.copyFileSync(SOURCE_P2P_NODE, TARGET_P2P_NODE);
+        } catch (err) {
+            if (!fs.existsSync(TARGET_P2P_NODE)) throw err;
+            console.log("      (steam_p2p_win64.node already present & in use)");
+        }
     }
 
     // 4. Install steam_multiplayer.js into %APPDATA%\shapez.io\mods
