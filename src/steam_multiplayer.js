@@ -77,76 +77,6 @@ function decodeJoinCode(code) {
     }
 }
 
-function serializeSdp(desc) {
-    if (!desc || typeof desc.type !== "string" || typeof desc.sdp !== "string" || !desc.sdp) {
-        return null;
-    }
-    return {
-        type: desc.type,
-        sdp: desc.sdp,
-    };
-}
-
-function serializeIceCandidate(cand) {
-    if (!cand || typeof cand.candidate !== "string" || !cand.candidate) {
-        return null;
-    }
-    return {
-        candidate: cand.candidate,
-        sdpMid: cand.sdpMid !== undefined ? cand.sdpMid : "0",
-        sdpMLineIndex: cand.sdpMLineIndex !== undefined ? cand.sdpMLineIndex : 0,
-        usernameFragment: cand.usernameFragment || undefined,
-    };
-}
-
-function waitForIceGathering(pc, timeoutMs = 1500) {
-    if (!pc || pc.iceGatheringState === "complete") {
-        return Promise.resolve();
-    }
-    return new Promise(resolve => {
-        let done = false;
-        let srflxTimer = null;
-        const finish = () => {
-            if (!done) {
-                done = true;
-                clearTimeout(timer);
-                if (srflxTimer) clearTimeout(srflxTimer);
-                try {
-                    if (typeof pc.removeEventListener === "function") {
-                        pc.removeEventListener("icegatheringstatechange", onStateChange);
-                        pc.removeEventListener("icecandidate", onCandidate);
-                    }
-                } catch (e) {}
-                resolve();
-            }
-        };
-        const onStateChange = () => {
-            if (pc.iceGatheringState === "complete") {
-                finish();
-            }
-        };
-        const onCandidate = ev => {
-            if (!ev || !ev.candidate) {
-                finish();
-            } else if (
-                typeof ev.candidate.candidate === "string" &&
-                ev.candidate.candidate.includes(" typ srflx ") &&
-                !srflxTimer
-            ) {
-                // Once we have a public STUN server-reflexive candidate, wait 200ms for any secondary pair then proceed
-                srflxTimer = setTimeout(finish, 200);
-            }
-        };
-        const timer = setTimeout(finish, timeoutMs);
-        if (typeof pc.addEventListener === "function") {
-            pc.addEventListener("icegatheringstatechange", onStateChange);
-            pc.addEventListener("icecandidate", onCandidate);
-        } else {
-            finish();
-        }
-    });
-}
-
 class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPart ? shapez.BaseHUDPart : class {}) {
     createElements(parent) {
         this.container = shapez.makeDiv(
@@ -586,26 +516,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 });
                 break;
             }
-            case "WEBRTC_OFFER": {
-                if (this.role !== "host") return;
-                await this.handleIncomingWebRtcOffer(fromSteamId, fromName, data.sdp);
-                break;
-            }
-            case "WEBRTC_ANSWER": {
-                if (this.role !== "client") return;
-                await this.handleIncomingWebRtcAnswer(fromSteamId, data.sdp);
-                break;
-            }
-            case "WEBRTC_ICE": {
-                await this.handleIncomingWebRtcIce(fromSteamId, data.candidate);
-                break;
-            }
             case "STEAM_PACKET": {
-                // Packet relay over Steam Lobby Data channel
                 if (this.role === "host") {
                     const peerId = "steam_" + fromSteamId;
                     if (!this.peers.has(peerId)) {
-                        this.registerHostPeer(peerId, "steam-relay", fromSteamId);
+                        this.registerHostPeer(peerId, "steam-p2p", fromSteamId);
                     }
                     this.onHostReceivedPeerMessage(peerId, data.packet);
                 } else if (this.role === "client") {
@@ -644,231 +559,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 break;
             }
         }
-    }
-
-    // =========================================================================
-    // WebRTC P2P DataChannel over Steam Lobby Signaling
-    // =========================================================================
-
-    createRtcPeerConnection(remoteSteamId, isHost, peerId) {
-        const pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-            ],
-        });
-
-        pc.onicecandidate = event => {
-            if (event.candidate && remoteSteamId) {
-                const plainCandidate = serializeIceCandidate(event.candidate);
-                if (plainCandidate) {
-                    ipcRenderer.invoke("steam:mp:send-friend-signal", {
-                        friendSteamId: remoteSteamId,
-                        data: {
-                            kind: "WEBRTC_ICE",
-                            candidate: plainCandidate,
-                        },
-                    });
-                }
-            }
-        };
-
-        if (isHost) {
-            pc.ondatachannel = event => {
-                const dc = event.channel;
-                this.setupHostRtcDataChannel(peerId, remoteSteamId, pc, dc);
-            };
-        }
-
-        return pc;
-    }
-
-    setupHostRtcDataChannel(peerId, remoteSteamId, pc, dc) {
-        dc.onopen = () => {
-            this.logInfo(`Host WebRTC DataChannel opened with ${remoteSteamId} (${peerId})`);
-            const peer = this.registerHostPeer(peerId, "webrtc", remoteSteamId);
-            peer.rtcPc = pc;
-            peer.rtcDc = dc;
-        };
-        dc.onmessage = ev => {
-            try {
-                const msg = JSON.parse(ev.data);
-                this.onHostReceivedPeerMessage(peerId, msg);
-            } catch (e) {}
-        };
-        dc.onclose = () => {
-            this.handleHostPeerDisconnected(peerId);
-        };
-    }
-
-    async flushPendingIceCandidates(remoteSteamId, pc) {
-        if (!pc || !pc.remoteDescription) return;
-        const queued = this.pendingIceCandidates.get(remoteSteamId);
-        if (!queued || queued.length === 0) return;
-        this.pendingIceCandidates.delete(remoteSteamId);
-        for (const cand of queued) {
-            try {
-                await pc.addIceCandidate(new RTCIceCandidate(cand));
-            } catch (e) {}
-        }
-    }
-
-    async handleIncomingWebRtcOffer(fromSteamId, fromName, sdp) {
-        const plainOffer = serializeSdp(sdp);
-        if (!plainOffer) {
-            this.logWarn(`Ignored malformed/empty WEBRTC_OFFER from ${fromSteamId}`);
-            return;
-        }
-        try {
-            const peerId = "rtc_" + fromSteamId;
-            const existingPeer = this.peers.get(peerId);
-            if (existingPeer && existingPeer.rtcDc && existingPeer.rtcDc.readyState === "open") {
-                return;
-            }
-            if (existingPeer && existingPeer.rtcPc) {
-                try {
-                    existingPeer.rtcPc.close();
-                } catch (e) {}
-            }
-
-            const pc = this.createRtcPeerConnection(fromSteamId, true, peerId);
-            const peer = this.registerHostPeer(peerId, "webrtc", fromSteamId);
-            peer.name = fromName || peer.name;
-            peer.rtcPc = pc;
-
-            await pc.setRemoteDescription(new RTCSessionDescription(plainOffer));
-            await this.flushPendingIceCandidates(fromSteamId, pc);
-
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            await waitForIceGathering(pc, 1500);
-
-            const plainAnswer = serializeSdp(pc.localDescription || answer);
-            if (plainAnswer) {
-                this.logInfo(`Sending WEBRTC_ANSWER to ${fromSteamId} (sdpLen=${plainAnswer.sdp.length})`);
-                await ipcRenderer.invoke("steam:mp:send-friend-signal", {
-                    friendSteamId: fromSteamId,
-                    data: {
-                        kind: "WEBRTC_ANSWER",
-                        sdp: plainAnswer,
-                    },
-                });
-            }
-        } catch (err) {
-            this.logWarn("WebRTC Offer handling failed: " + (err.message || err));
-        }
-    }
-
-    async handleIncomingWebRtcAnswer(fromSteamId, sdp) {
-        if (!this.clientRtcPc) return;
-        const plainAnswer = serializeSdp(sdp);
-        if (!plainAnswer) {
-            this.logWarn(`Ignored malformed/empty WEBRTC_ANSWER from ${fromSteamId}`);
-            return;
-        }
-        try {
-            if (this.clientRtcPc.signalingState === "stable") return;
-            await this.clientRtcPc.setRemoteDescription(new RTCSessionDescription(plainAnswer));
-            await this.flushPendingIceCandidates(fromSteamId, this.clientRtcPc);
-            this.logInfo(`Applied WEBRTC_ANSWER from ${fromSteamId}`);
-        } catch (err) {
-            this.logWarn("WebRTC Answer handling failed: " + (err.message || err));
-        }
-    }
-
-    async handleIncomingWebRtcIce(fromSteamId, candidate) {
-        const plainCand = serializeIceCandidate(candidate);
-        if (!plainCand) return;
-        try {
-            const targetPc =
-                this.role === "host"
-                    ? this.peers.get("rtc_" + fromSteamId)?.rtcPc
-                    : this.role === "client"
-                    ? this.clientRtcPc
-                    : null;
-            if (!targetPc || !targetPc.remoteDescription || !targetPc.remoteDescription.type) {
-                const list = this.pendingIceCandidates.get(fromSteamId) || [];
-                list.push(plainCand);
-                this.pendingIceCandidates.set(fromSteamId, list);
-                return;
-            }
-            await targetPc.addIceCandidate(new RTCIceCandidate(plainCand));
-        } catch (e) {}
-    }
-
-    async connectClientWebRtcOverSteam(hostSteamId, timeoutMs = 8500) {
-        if (!hostSteamId) throw new Error("No host Steam ID for WebRTC");
-        const pc = this.createRtcPeerConnection(hostSteamId, false, "host");
-        this.clientRtcPc = pc;
-        const dc = pc.createDataChannel("shapez_mp", { ordered: true });
-        this.clientRtcDc = dc;
-
-        return new Promise((resolve, reject) => {
-            let settled = false;
-            let resendTimer = null;
-            const timer = setTimeout(() => {
-                if (!settled) {
-                    settled = true;
-                    if (resendTimer) clearTimeout(resendTimer);
-                    reject(new Error("WebRTC P2P handshake timed out"));
-                }
-            }, timeoutMs);
-
-            dc.onopen = () => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer);
-                if (resendTimer) clearTimeout(resendTimer);
-                this.clientTransport = "webrtc";
-                this.logInfo(`Client WebRTC DataChannel opened with host ${hostSteamId}`);
-                resolve({ connected: true, transport: "webrtc" });
-            };
-
-            dc.onmessage = ev => {
-                try {
-                    const msg = JSON.parse(ev.data);
-                    this.onClientReceivedMessage(msg);
-                } catch (e) {}
-            };
-
-            dc.onclose = () => {
-                if (this.clientTransport === "webrtc") {
-                    this.onClientDisconnected();
-                }
-            };
-
-            pc.createOffer()
-                .then(offer => pc.setLocalDescription(offer))
-                .then(() => waitForIceGathering(pc, 1500))
-                .then(() => {
-                    if (settled) return;
-                    const plainOffer = serializeSdp(pc.localDescription);
-                    if (!plainOffer) {
-                        throw new Error("Failed to serialize WebRTC localDescription");
-                    }
-                    this.logInfo(`Sending WEBRTC_OFFER to ${hostSteamId} (sdpLen=${plainOffer.sdp.length})`);
-                    const sendOffer = () => {
-                        if (settled || pc.signalingState === "stable") return;
-                        ipcRenderer.invoke("steam:mp:send-friend-signal", {
-                            friendSteamId: hostSteamId,
-                            data: {
-                                kind: "WEBRTC_OFFER",
-                                sdp: serializeSdp(pc.localDescription) || plainOffer,
-                            },
-                        });
-                    };
-                    sendOffer();
-                    resendTimer = setTimeout(sendOffer, 3500);
-                })
-                .catch(err => {
-                    if (!settled) {
-                        settled = true;
-                        clearTimeout(timer);
-                        if (resendTimer) clearTimeout(resendTimer);
-                        reject(err);
-                    }
-                });
-        });
     }
 
     // =========================================================================
@@ -1016,8 +706,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.clientTransport = "";
         this.clientWorldLoaded = false;
 
-        // Ensure we join the Host's Steam Lobby whenever a lobbyId or hostSteamId is available
-        // so that Steam Lobby signaling and packet relay work between the two players.
+        // Join the Host's Steam Lobby whenever a lobbyId or hostSteamId is available
         if (!alreadyJoinedLobby && (lobbyId || hostSteamId) && typeof ipcRenderer !== "undefined") {
             try {
                 const joinArg = hostSteamId ? { lobbyId, hostSteamId } : lobbyId;
@@ -1042,14 +731,15 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         const localSteamId = this.getLocalPlayerInfo().id;
         const isRemoteSteamHost = Boolean(this.hostSteamId && this.hostSteamId !== localSteamId);
 
-        // 1. Try TCP endpoints (Public UPnP IP / LAN / VPN / Localhost)
+        // 1. Try direct TCP endpoints (Localhost / LAN / UPnP)
         const cleanEndpoints = Array.from(new Set(endpoints.map(e => e.trim()).filter(Boolean)));
         for (const ep of cleanEndpoints) {
             const [host, portStr] = ep.split(":");
             const port = Number(portStr) || 27080;
             if (!host) continue;
             const isLoopback = host === "127.0.0.1" || host === "localhost";
-            const tcpTimeout = isRemoteSteamHost ? (isLoopback ? 500 : 1600) : 3500;
+            if (isRemoteSteamHost && isLoopback) continue;
+            const tcpTimeout = isRemoteSteamHost ? 1200 : 3000;
             try {
                 this.showToast(`Connecting to ${host}:${port}...`);
                 await ipcRenderer.invoke("mp:net:client-connect", {
@@ -1067,19 +757,12 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             }
         }
 
-        // 2. Try WebRTC P2P over Steam Lobby Signaling if TCP wasn't reachable
+        // 2. Use Native Steamworks ISteamNetworking P2P if TCP wasn't reachable
         if (!connected && (this.hostSteamId || this.lobbyId)) {
-            const signalTargetId = this.hostSteamId || "host";
-            try {
-                this.showToast("Connecting via Steam P2P (WebRTC)...");
-                await this.connectClientWebRtcOverSteam(signalTargetId, 8500);
-                connected = true;
-            } catch (e) {
-                this.logWarn(`WebRTC P2P failed (${e.message}), using Steam Lobby Relay`);
-                this.clientTransport = "steam-relay";
-                if (!this.hostSteamId) this.hostSteamId = signalTargetId;
-                connected = true;
-            }
+            this.clientTransport = "steam-p2p";
+            if (!this.hostSteamId) this.hostSteamId = "host";
+            connected = true;
+            this.logInfo(`Connecting to Host ${this.hostSteamId} via Native Steam P2P`);
         }
 
         if (!connected) {
@@ -1102,18 +785,18 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         };
         sendHello();
 
-        // If on steam-relay, retry HELLO up to 3 times if WELCOME_WORLD hasn't arrived yet
-        if (this.clientTransport === "steam-relay") {
+        // Retry HELLO up to 4 times over Steam P2P until WELCOME_WORLD arrives (handles initial Steam Relay circuit setup)
+        if (this.clientTransport === "steam-p2p") {
             let retries = 0;
             this.clientHelloTimer = setInterval(() => {
                 retries++;
-                if (this.role !== "client" || this.clientWorldLoaded || retries > 3) {
+                if (this.role !== "client" || this.clientWorldLoaded || retries > 4) {
                     clearInterval(this.clientHelloTimer);
                     this.clientHelloTimer = null;
                     return;
                 }
                 sendHello();
-            }, 2200);
+            }, 1500);
         }
 
         this.showToast("Connected to Host! Synchronizing factory world...");
@@ -1136,25 +819,9 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             } catch (e) {}
         }
 
-        for (const [, peer] of this.peers) {
-            if (peer.rtcPc) {
-                try {
-                    peer.rtcPc.close();
-                } catch (e) {}
-            }
-        }
-        if (this.clientRtcPc) {
-            try {
-                this.clientRtcPc.close();
-            } catch (e) {}
-            this.clientRtcPc = null;
-            this.clientRtcDc = null;
-        }
-
         this.peers.clear();
         this.remotePlayers.clear();
         this.clientChunkBuffer.clear();
-        this.pendingIceCandidates.clear();
         this.pendingActionsQueue = [];
         this.activeCoopSavegame = null;
         this.clientWorldLoaded = false;
@@ -1185,8 +852,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 name: "Player " + (this.peers.size + 2),
                 color: PLAYER_COLORS[colorIdx],
                 transport,
-                rtcPc: null,
-                rtcDc: null,
                 ready: false,
             };
             this.peers.set(peerId, peer);
@@ -1235,8 +900,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (!peer) return;
         if (peer.transport === "tcp") {
             ipcRenderer.invoke("mp:net:host-send", { peerId: peer.peerId, message });
-        } else if (peer.transport === "webrtc" && peer.rtcDc && peer.rtcDc.readyState === "open") {
-            peer.rtcDc.send(JSON.stringify(message));
         } else if (peer.steamId) {
             ipcRenderer.invoke("steam:mp:send-friend-signal", {
                 friendSteamId: peer.steamId,
@@ -1247,7 +910,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
     sendChunkedToPeer(peer, message) {
         const serialized = JSON.stringify(message);
-        const CHUNK_SIZE = peer && (peer.transport === "tcp" || peer.transport === "webrtc") ? 48000 : 16000;
+        const CHUNK_SIZE = 48000;
         if (serialized.length <= CHUNK_SIZE) {
             this.sendRawToPeer(peer, message);
             return;
@@ -1278,12 +941,6 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (this.role !== "client") return;
         if (this.clientTransport === "tcp") {
             ipcRenderer.invoke("mp:net:client-send", { message });
-        } else if (
-            this.clientTransport === "webrtc" &&
-            this.clientRtcDc &&
-            this.clientRtcDc.readyState === "open"
-        ) {
-            this.clientRtcDc.send(JSON.stringify(message));
         } else if (this.hostSteamId) {
             ipcRenderer.invoke("steam:mp:send-friend-signal", {
                 friendSteamId: this.hostSteamId,
@@ -3323,9 +2980,6 @@ if (typeof module !== "undefined" && module.exports) {
         escapeHtml,
         encodeJoinCode,
         decodeJoinCode,
-        serializeSdp,
-        serializeIceCandidate,
-        waitForIceGathering,
         HUDMultiplayer,
         Mod,
     };

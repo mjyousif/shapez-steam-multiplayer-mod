@@ -5,18 +5,24 @@ const dgram = require("dgram");
 const http = require("http");
 const zlib = require("zlib");
 const os = require("os");
-const { ipcMain } = require("electron");
+let ipcMain = { handle: () => {}, on: () => {} };
+try {
+    const electron = require("electron");
+    if (electron && electron.ipcMain) {
+        ipcMain = electron.ipcMain;
+    }
+} catch {}
 
 let greenworks = null;
+let steamP2P = null;
+let p2pInitialized = false;
+let p2pPollTimer = null;
 let appId = null;
 let initialized = false;
 let mainWindow = null;
 let currentLobbyId = null;
 let currentLobbyHostId = null;
 let lobbyRole = "none"; // "none" | "host" | "client"
-let clientOutboxLobbyId = null;
-let creatingInternalLobby = false;
-let joiningInternalLobby = false;
 let fallbackProfile = null;
 
 // Persistent Logging
@@ -65,6 +71,61 @@ try {
 } catch (err) {
     // greenworks is not installed
     logWarn("Failed to load steam api: " + (err && err.message ? err.message : err));
+}
+
+function loadNativeSteamP2P() {
+    if (steamP2P) return steamP2P;
+    const candidates = [
+        process.resourcesPath
+            ? path.join(
+                  process.resourcesPath,
+                  "app.asar.unpacked",
+                  "node_modules",
+                  "shapez.io-private-artifacts",
+                  "steam",
+                  "lib",
+                  "win64",
+                  "steam_p2p_win64.node"
+              )
+            : "",
+        path.join(
+            __dirname,
+            "..",
+            "app.asar.unpacked",
+            "node_modules",
+            "shapez.io-private-artifacts",
+            "steam",
+            "lib",
+            "win64",
+            "steam_p2p_win64.node"
+        ),
+        path.join(__dirname, "steam_p2p_win64.node"),
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        try {
+            if (fs.existsSync(candidate)) {
+                steamP2P = require(candidate);
+                logInfo("Loaded native Steam P2P bridge: " + candidate);
+                return steamP2P;
+            }
+        } catch (err) {
+            logWarn("Failed to load steam_p2p_win64.node from " + candidate + ": " + (err.message || err));
+        }
+    }
+    return null;
+}
+
+function steamIdToBuffer8(idStr) {
+    const s = String(idStr || "").trim();
+    if (!/^\d{15,20}$/.test(s)) return null;
+    try {
+        const buf = Buffer.allocUnsafe(8);
+        buf.writeBigUInt64LE(BigInt(s), 0);
+        return buf;
+    } catch (e) {
+        return null;
+    }
 }
 
 console.log("App ID:", appId);
@@ -162,6 +223,20 @@ function init(isDev, allowMultiInstance = false) {
         console.log("Steam (greenworks) initialized successfully.");
         writeMpLog("MAIN", "INFO", "Steam (greenworks) initialized successfully.");
 
+        const nativeP2P = loadNativeSteamP2P();
+        if (nativeP2P && typeof nativeP2P.init === "function") {
+            try {
+                p2pInitialized = Boolean(nativeP2P.init());
+                logInfo("Native ISteamNetworking P2P initialized: " + p2pInitialized);
+                if (p2pInitialized) {
+                    startP2PPollTimer();
+                }
+            } catch (err) {
+                p2pInitialized = false;
+                logWarn("Native Steam P2P init failed: " + (err.message || err));
+            }
+        }
+
         setupSteamEventListeners();
     } catch (err) {
         logWarn("Steam initialization threw error (continuing in local/LAN fallback mode): " + (err.message || err));
@@ -172,19 +247,125 @@ function init(isDev, allowMultiInstance = false) {
 }
 
 // ============================================================================
-// Full-Duplex Steam Lobby Signaling & Packet Relay (No Steam Chat Messages!)
+// Native ISteamNetworking P2P Packet Transport + Single-Lobby Metadata Channel
 // ============================================================================
 
+const acceptedP2PPeers = new Set();
 let lobbyPollTimer = null;
 let txSeqCounter = 0;
 const txQueues = new Map(); // targetSteamId -> Array<{ seq, ts, data }>
 const rxLastSeq = new Map(); // fromSteamId -> number
 const peerAckSeq = new Map(); // peerSteamId -> number
 const knownLobbyMembers = new Set();
-const peerOutboxLobbies = new Map(); // clientSteamId -> outboxLobbyId
-const joinedPeerOutboxes = new Set();
-let lastHandoffAt = 0;
-let handoffTargetId = "";
+
+function ensureP2PSessionAccepted(steamIdStr) {
+    if (!p2pInitialized || !steamP2P || !steamIdStr) return;
+    if (acceptedP2PPeers.has(steamIdStr)) return;
+    const idBuf = steamIdToBuffer8(steamIdStr);
+    if (!idBuf) return;
+    try {
+        steamP2P.acceptP2PSession(idBuf);
+        acceptedP2PPeers.add(steamIdStr);
+    } catch (e) {}
+}
+
+function drainP2PChannel(channel) {
+    if (!p2pInitialized || !steamP2P || typeof steamP2P.readP2PPacket !== "function") return;
+    let guard = 0;
+    while (guard++ < 64) {
+        let pkt = null;
+        try {
+            pkt = steamP2P.readP2PPacket(channel);
+        } catch (e) {
+            break;
+        }
+        if (!pkt || pkt.length <= 8) break;
+
+        let fromId = "";
+        try {
+            fromId = pkt.readBigUInt64LE(0).toString();
+        } catch (e) {
+            continue;
+        }
+        ensureP2PSessionAccepted(fromId);
+
+        let parsed = null;
+        try {
+            parsed = JSON.parse(pkt.subarray(8).toString("utf8"));
+        } catch (e) {
+            continue;
+        }
+        if (!parsed || typeof parsed !== "object") continue;
+
+        let fromName = fromId;
+        try {
+            if (greenworks && typeof greenworks.getFriendPersonaName === "function") {
+                fromName = greenworks.getFriendPersonaName(fromId) || fromId;
+            }
+        } catch (e) {}
+
+        const dataObj = parsed.kind ? parsed : { kind: "STEAM_PACKET", packet: parsed };
+        if (channel === 0 && (!dataObj.packet || dataObj.packet.type !== "CURSOR")) {
+            logInfo(
+                `Received Steam P2P packet kind=${dataObj.kind}${
+                    dataObj.packet && dataObj.packet.type ? ":" + dataObj.packet.type : ""
+                } from=${fromName} (${fromId})`
+            );
+        }
+
+        sendToRenderer("steam:mp:event", {
+            type: "steam-friend-signal",
+            fromSteamId: fromId,
+            fromName,
+            data: dataObj,
+        });
+    }
+}
+
+function startP2PPollTimer() {
+    if (p2pPollTimer) clearInterval(p2pPollTimer);
+    p2pPollTimer = setInterval(() => {
+        drainP2PChannel(0);
+        drainP2PChannel(1);
+    }, 15);
+    if (typeof p2pPollTimer.unref === "function") {
+        p2pPollTimer.unref();
+    }
+}
+
+function sendViaSteamP2P(targetSteamId, dataObj) {
+    if (!p2pInitialized || !steamP2P || typeof steamP2P.sendP2PPacket !== "function") {
+        return false;
+    }
+    const idBuf = steamIdToBuffer8(targetSteamId);
+    if (!idBuf) return false;
+
+    ensureP2PSessionAccepted(targetSteamId);
+
+    const isUnreliableCursor =
+        dataObj &&
+        dataObj.kind === "STEAM_PACKET" &&
+        dataObj.packet &&
+        dataObj.packet.type === "CURSOR";
+    const sendType = isUnreliableCursor ? 0 : 2; // 0 = k_EP2PSendUnreliable, 2 = k_EP2PSendReliable (up to 1MB)
+    const channel = isUnreliableCursor ? 1 : 0;
+
+    try {
+        const payloadBuf = Buffer.from(JSON.stringify(dataObj), "utf8");
+        const ok = Boolean(steamP2P.sendP2PPacket(idBuf, payloadBuf, sendType, channel));
+        if (channel === 0) {
+            logInfo(
+                `Sent Steam P2P packet (${payloadBuf.length}B, ok=${ok}) kind=${dataObj.kind}${
+                    dataObj.packet && dataObj.packet.type ? ":" + dataObj.packet.type : ""
+                } to=${targetSteamId}`
+            );
+        }
+        return ok;
+    } catch (err) {
+        logWarn("sendP2PPacket failed: " + (err.message || err));
+        return false;
+    }
+}
 
 function encodeLobbyWindow(windowObj) {
     try {
@@ -218,30 +399,7 @@ function resetLobbyChannelState() {
     rxLastSeq.clear();
     peerAckSeq.clear();
     knownLobbyMembers.clear();
-    for (const outboxId of joinedPeerOutboxes) {
-        try {
-            if (initialized && greenworks && typeof greenworks.leaveLobby === "function" && isRealSteamLobbyId(outboxId)) {
-                greenworks.leaveLobby(outboxId);
-            }
-        } catch (e) {}
-    }
-    peerOutboxLobbies.clear();
-    joinedPeerOutboxes.clear();
-    if (clientOutboxLobbyId) {
-        try {
-            if (
-                initialized &&
-                greenworks &&
-                typeof greenworks.leaveLobby === "function" &&
-                isRealSteamLobbyId(clientOutboxLobbyId)
-            ) {
-                greenworks.leaveLobby(clientOutboxLobbyId);
-            }
-        } catch (e) {}
-        clientOutboxLobbyId = null;
-    }
-    lastHandoffAt = 0;
-    handoffTargetId = "";
+    acceptedP2PPeers.clear();
 }
 
 function startLobbyPollTimer() {
@@ -252,7 +410,10 @@ function startLobbyPollTimer() {
         try {
             pollLobbyChannel();
         } catch (e) {}
-    }, 200);
+    }, 250);
+    if (typeof lobbyPollTimer.unref === "function") {
+        lobbyPollTimer.unref();
+    }
 }
 
 function getLobbyOwnerSteamId(lobbyId) {
@@ -271,11 +432,9 @@ function buildEncodedWindowForTarget(targetSteamId, fromSteamId) {
     const acked = peerAckSeq.get(targetSteamId) || 0;
     const now = Date.now();
 
-    // Prune acknowledged or expired (>25s) messages
     const remaining = queue.filter(item => item.seq > acked && now - item.ts < 25000);
     txQueues.set(targetSteamId, remaining);
 
-    // Pack items in order up to ~2800 compressed bytes so we stay well within Steam's 8KB Lobby Data limit
     const activeItems = [];
     let encoded = encodeLobbyWindow({
         from: fromSteamId,
@@ -301,16 +460,12 @@ function buildEncodedWindowForTarget(targetSteamId, fromSteamId) {
 }
 
 function flushLobbyChannel() {
-    if (!initialized || !greenworks || typeof greenworks.setLobbyData !== "function") {
+    if (!initialized || !greenworks || typeof greenworks.setLobbyData !== "function" || !isRealSteamLobbyId(currentLobbyId)) {
         return false;
     }
     const localId = getLocalSteamProfile().steamId;
 
-    if (lobbyRole === "host" && isRealSteamLobbyId(currentLobbyId)) {
-        const currentOwner = getLobbyOwnerSteamId(currentLobbyId);
-        if (currentOwner && currentOwner !== localId) {
-            return false;
-        }
+    if (lobbyRole === "host") {
         let wroteAny = false;
         for (const [targetSteamId] of txQueues) {
             const encoded = buildEncodedWindowForTarget(targetSteamId, localId);
@@ -333,45 +488,13 @@ function flushLobbyChannel() {
         const targetHost = currentLobbyHostId || "host";
         const encoded = buildEncodedWindowForTarget(targetHost, localId);
         const ackStr = String(rxLastSeq.get(targetHost) || 0);
-        let wroteAny = false;
-
-        // 1. Always write immediately to Client's dedicated Outbox Lobby (Client is permanent owner!)
-        if (isRealSteamLobbyId(clientOutboxLobbyId)) {
-            try {
-                if (encoded) {
-                    greenworks.setLobbyData(clientOutboxLobbyId, "mp_c2h_" + localId, encoded);
-                }
-                greenworks.setLobbyData(clientOutboxLobbyId, "ack_host", ackStr);
-                if (currentLobbyId) {
-                    greenworks.setLobbyData(clientOutboxLobbyId, "host_lobby_id", currentLobbyId);
-                }
-                wroteAny = true;
-            } catch (e) {}
-        }
-
-        // 2. If Host temporarily handed ownership of currentLobbyId to Client, register outbox & flush window onto currentLobbyId, then immediately return ownership!
-        if (isRealSteamLobbyId(currentLobbyId)) {
-            const currentOwner = getLobbyOwnerSteamId(currentLobbyId);
-            if (currentOwner === localId) {
-                try {
-                    if (isRealSteamLobbyId(clientOutboxLobbyId)) {
-                        greenworks.setLobbyData(currentLobbyId, "outbox_" + localId, clientOutboxLobbyId);
-                    }
-                    if (encoded) {
-                        greenworks.setLobbyData(currentLobbyId, "mp_c2h_" + localId, encoded);
-                    }
-                    greenworks.setLobbyData(currentLobbyId, "ack_" + localId, ackStr);
-                    wroteAny = true;
-                } catch (e) {}
-                if (currentLobbyHostId && currentLobbyHostId !== localId && typeof greenworks.setLobbyOwner === "function") {
-                    try {
-                        greenworks.setLobbyOwner(currentLobbyId, currentLobbyHostId);
-                    } catch (e) {}
-                }
+        try {
+            if (encoded) {
+                greenworks.setLobbyData(currentLobbyId, "mp_c2h_" + localId, encoded);
             }
-        }
-
-        return wroteAny;
+            greenworks.setLobbyData(currentLobbyId, "ack_" + localId, ackStr);
+            return true;
+        } catch (e) {}
     }
 
     return false;
@@ -422,42 +545,11 @@ function processIncomingEncodedWindow(expectedFromSteamId, rawStr) {
     }
 }
 
-function joinPeerOutboxLobby(memberId, outboxLobbyId) {
-    if (!initialized || !greenworks || !isRealSteamLobbyId(outboxLobbyId)) return;
-    if (joinedPeerOutboxes.has(outboxLobbyId)) return;
-    joinedPeerOutboxes.add(outboxLobbyId);
-    peerOutboxLobbies.set(memberId, outboxLobbyId);
-
-    logInfo(`Host joining client ${memberId} outbox lobby: ${outboxLobbyId}`);
-    try {
-        joiningInternalLobby = true;
-        greenworks.joinLobby(outboxLobbyId);
-        setTimeout(() => {
-            joiningInternalLobby = false;
-            // Re-assert primary host lobby so Steam's m_steamIDLobby for Host remains currentLobbyId
-            if (lobbyRole === "host" && isRealSteamLobbyId(currentLobbyId)) {
-                try {
-                    joiningInternalLobby = true;
-                    greenworks.joinLobby(currentLobbyId);
-                    setTimeout(() => {
-                        joiningInternalLobby = false;
-                    }, 250);
-                } catch (e) {
-                    joiningInternalLobby = false;
-                }
-            }
-        }, 350);
-    } catch (e) {
-        joiningInternalLobby = false;
-    }
-}
-
 function pollLobbyChannel() {
     if (!initialized || !greenworks || !isRealSteamLobbyId(currentLobbyId)) return;
     const localId = getLocalSteamProfile().steamId;
 
     if (lobbyRole === "host") {
-        // 1. Discover members in currentLobbyId
         let memberCount = 0;
         try {
             if (typeof greenworks.getNumLobbyMembers === "function") {
@@ -472,6 +564,7 @@ function pollLobbyChannel() {
                 const mId = normalizeSteamId(mObj);
                 if (mId && mId !== localId) {
                     currentMembers.add(mId);
+                    ensureP2PSessionAccepted(mId);
                     if (!knownLobbyMembers.has(mId)) {
                         knownLobbyMembers.add(mId);
                         let mName = mId;
@@ -492,40 +585,13 @@ function pollLobbyChannel() {
             } catch (e) {}
         }
 
-        // Also check any targetSteamId we have queued messages for
         for (const [targetId] of txQueues) {
             if (targetId && targetId !== localId) {
                 currentMembers.add(targetId);
             }
         }
 
-        const currentOwner = getLobbyOwnerSteamId(currentLobbyId);
-
         for (const memberId of currentMembers) {
-            // Discover member's outbox lobby via currentLobbyId metadata OR getFriendGamePlayed
-            let outboxId = peerOutboxLobbies.get(memberId) || "";
-            try {
-                const fromLobbyData = greenworks.getLobbyData(currentLobbyId, "outbox_" + memberId) || "";
-                if (isRealSteamLobbyId(fromLobbyData)) {
-                    outboxId = fromLobbyData;
-                }
-            } catch (e) {}
-
-            if (!outboxId && typeof greenworks.getFriendGamePlayed === "function") {
-                try {
-                    const gp = greenworks.getFriendGamePlayed(memberId);
-                    const gpLobby = gp && gp.m_steamIDLobby ? normalizeSteamId(gp.m_steamIDLobby) : "";
-                    if (isRealSteamLobbyId(gpLobby) && gpLobby !== currentLobbyId) {
-                        outboxId = gpLobby;
-                    }
-                } catch (e) {}
-            }
-
-            if (outboxId && !joinedPeerOutboxes.has(outboxId)) {
-                joinPeerOutboxLobby(memberId, outboxId);
-            }
-
-            // Read ack & incoming window from currentLobbyId
             try {
                 const ackVal = Number(greenworks.getLobbyData(currentLobbyId, "ack_" + memberId) || 0);
                 if (ackVal > (peerAckSeq.get(memberId) || 0)) {
@@ -536,46 +602,17 @@ function pollLobbyChannel() {
                     processIncomingEncodedWindow(memberId, rawOnHostLobby);
                 }
             } catch (e) {}
-
-            // Read incoming window from member's dedicated outbox lobby
-            const activeOutbox = peerOutboxLobbies.get(memberId);
-            if (activeOutbox && isRealSteamLobbyId(activeOutbox)) {
-                try {
-                    const ackVal = Number(greenworks.getLobbyData(activeOutbox, "ack_host") || 0);
-                    if (ackVal > (peerAckSeq.get(memberId) || 0)) {
-                        peerAckSeq.set(memberId, ackVal);
-                    }
-                    const rawOnOutbox = greenworks.getLobbyData(activeOutbox, "mp_c2h_" + memberId);
-                    if (rawOnOutbox) {
-                        processIncomingEncodedWindow(memberId, rawOnOutbox);
-                    }
-                } catch (e) {}
-            }
-
-            // If we haven't discovered the member's outbox lobby yet, briefly pass ownership of currentLobbyId so client can write outbox_<id> and mp_c2h_<id>
-            if (
-                currentOwner === localId &&
-                Date.now() - lastHandoffAt > 1200 &&
-                typeof greenworks.setLobbyOwner === "function"
-            ) {
-                lastHandoffAt = Date.now();
-                handoffTargetId = memberId;
-                flushLobbyChannel();
-                try {
-                    greenworks.setLobbyOwner(currentLobbyId, memberId);
-                } catch (e) {}
-            }
         }
 
         flushLobbyChannel();
     } else if (lobbyRole === "client") {
-        // Resolve hostId if not yet known
         if (!currentLobbyHostId) {
             try {
                 const hId =
                     greenworks.getLobbyData(currentLobbyId, "host_id") || getLobbyOwnerSteamId(currentLobbyId);
                 if (hId && hId !== localId) {
                     currentLobbyHostId = hId;
+                    ensureP2PSessionAccepted(hId);
                 }
             } catch (e) {}
         }
@@ -600,7 +637,7 @@ function pollLobbyChannel() {
     }
 }
 
-function createSteamLobbyInternal(maxPlayers = 8, isInternalOutbox = false) {
+function createSteamLobbyInternal(maxPlayers = 8) {
     if (!initialized || !greenworks || typeof greenworks.createLobby !== "function") {
         return Promise.resolve(null);
     }
@@ -616,7 +653,6 @@ function createSteamLobbyInternal(maxPlayers = 8, isInternalOutbox = false) {
         const finish = id => {
             if (!done) {
                 done = true;
-                if (isInternalOutbox) creatingInternalLobby = false;
                 resolve(id && isRealSteamLobbyId(id) ? normalizeSteamId(id) : null);
             }
         };
@@ -634,9 +670,6 @@ function createSteamLobbyInternal(maxPlayers = 8, isInternalOutbox = false) {
             greenworks.once("lobby-created", onCreated);
         }
         try {
-            if (isInternalOutbox) creatingInternalLobby = true;
-            // Note: greenworks.createLobby synchronously returns a SteamAPICall_t handle, NOT the Lobby ID!
-            // Wait for the "lobby-created" event (or the callback in unit test mocks).
             greenworks.createLobby(lobbyType, maxPlayers, id => {
                 if (id) {
                     clearTimeout(timer);
@@ -657,8 +690,8 @@ function setupSteamEventListeners() {
 
     greenworks.on("lobby-created", (result, lobbyId) => {
         const idStr = normalizeSteamId(lobbyId || (typeof result === "string" ? result : ""));
-        logInfo(`lobby-created event: result=${result} lobbyId=${idStr} internal=${creatingInternalLobby}`);
-        if (!creatingInternalLobby && idStr && isRealSteamLobbyId(idStr)) {
+        logInfo(`lobby-created event: result=${result} lobbyId=${idStr}`);
+        if (idStr && isRealSteamLobbyId(idStr)) {
             currentLobbyId = idStr;
         }
         sendToRenderer("steam:mp:event", {
@@ -670,8 +703,8 @@ function setupSteamEventListeners() {
 
     greenworks.on("lobby-enter", (lobbyId, chatPermissions, locked, response) => {
         const idStr = normalizeSteamId(lobbyId);
-        logInfo(`lobby-enter event: lobbyId=${idStr} response=${response} internal=${creatingInternalLobby || joiningInternalLobby}`);
-        if (!creatingInternalLobby && !joiningInternalLobby && idStr && isRealSteamLobbyId(idStr)) {
+        logInfo(`lobby-enter event: lobbyId=${idStr} response=${response}`);
+        if (idStr && isRealSteamLobbyId(idStr)) {
             currentLobbyId = idStr;
         }
         sendToRenderer("steam:mp:event", {
@@ -708,6 +741,7 @@ function setupSteamEventListeners() {
     greenworks.on("lobby-invite", (inviterId, lobbyId, gameId) => {
         const fromId = normalizeSteamId(inviterId);
         const targetLobby = normalizeSteamId(lobbyId);
+        ensureP2PSessionAccepted(fromId);
         let fromName = fromId;
         try {
             if (greenworks.getFriendPersonaName) {
@@ -727,6 +761,7 @@ function setupSteamEventListeners() {
     greenworks.on("lobby-join-requested", (lobbyId, friendId) => {
         const targetLobby = normalizeSteamId(lobbyId);
         const fromFriend = normalizeSteamId(friendId);
+        ensureP2PSessionAccepted(fromFriend);
         logInfo(`lobby-join-requested: lobby=${targetLobby} from=${fromFriend}`);
         sendToRenderer("steam:mp:event", {
             type: "lobby-join-requested",
@@ -737,6 +772,7 @@ function setupSteamEventListeners() {
 
     greenworks.on("rich-presence-join-requested", (friendId, connectStr) => {
         const fromFriend = normalizeSteamId(friendId);
+        ensureP2PSessionAccepted(fromFriend);
         logInfo(`rich-presence-join-requested: from=${fromFriend} connect=${connectStr}`);
         sendToRenderer("steam:mp:event", {
             type: "rich-presence-join-requested",
@@ -1159,6 +1195,7 @@ function listen() {
         }
         return {
             initialized: Boolean(initialized && greenworks),
+            p2pInitialized,
             profile: getLocalSteamProfile(),
             launchCmd,
             activeLobbyId: currentLobbyId,
@@ -1201,6 +1238,15 @@ function listen() {
                 let mpMode = "";
                 let isPlayingShapez = false;
                 let isInGame = false;
+
+                if (p2pInitialized && steamP2P && typeof steamP2P.requestFriendRichPresence === "function") {
+                    const idBuf = steamIdToBuffer8(steamId);
+                    if (idBuf) {
+                        try {
+                            steamP2P.requestFriendRichPresence(idBuf);
+                        } catch (e) {}
+                    }
+                }
 
                 if (typeof greenworks.getFriendGamePlayed === "function") {
                     try {
@@ -1271,7 +1317,7 @@ function listen() {
         resetLobbyChannelState();
 
         // Create native Steam Matchmaking Lobby and wait for "lobby-created"
-        let lobbyId = await createSteamLobbyInternal(maxPlayers, false);
+        let lobbyId = await createSteamLobbyInternal(maxPlayers);
 
         if (!lobbyId) {
             lobbyId = "steam_lobby_" + profile.steamId;
@@ -1345,6 +1391,9 @@ function listen() {
             } catch (e) {}
         }
 
+        if (!targetLobby && hostSteamIdArg) {
+            targetLobby = "steam_lobby_" + hostSteamIdArg;
+        }
         if (!targetLobby) throw new Error("Missing lobbyId");
 
         resetLobbyChannelState();
@@ -1352,9 +1401,21 @@ function listen() {
         currentLobbyHostId = hostSteamIdArg || "";
         lobbyRole = "client";
 
+        if (currentLobbyHostId) {
+            ensureP2PSessionAccepted(currentLobbyHostId);
+        }
+
         const joinSingleLobby = idToJoin => {
             if (!initialized || !greenworks || typeof greenworks.joinLobby !== "function" || !isRealSteamLobbyId(idToJoin)) {
                 return Promise.resolve();
+            }
+            if (p2pInitialized && steamP2P && typeof steamP2P.requestLobbyData === "function") {
+                const lobbyBuf = steamIdToBuffer8(idToJoin);
+                if (lobbyBuf) {
+                    try {
+                        steamP2P.requestLobbyData(lobbyBuf);
+                    } catch (e) {}
+                }
             }
             return new Promise(resolve => {
                 let settled = false;
@@ -1396,14 +1457,6 @@ function listen() {
             isRealSteamLobbyId(currentLobbyId)
         ) {
             try {
-                // Check if this lobby was a client outbox lobby that points to a primary host_lobby_id
-                const redirectedHostLobby = greenworks.getLobbyData(currentLobbyId, "host_lobby_id") || "";
-                if (isRealSteamLobbyId(redirectedHostLobby) && redirectedHostLobby !== currentLobbyId) {
-                    logInfo(`Redirecting from outbox lobby ${currentLobbyId} to primary host lobby ${redirectedHostLobby}`);
-                    currentLobbyId = redirectedHostLobby;
-                    await joinSingleLobby(currentLobbyId);
-                }
-
                 endpoints = greenworks.getLobbyData(currentLobbyId, "mp_endpoints") || "";
                 hostId =
                     greenworks.getLobbyData(currentLobbyId, "host_id") ||
@@ -1414,24 +1467,16 @@ function listen() {
         }
 
         currentLobbyHostId = hostId;
+        if (hostId) {
+            ensureP2PSessionAccepted(hostId);
+        }
         if (!hostName && hostId && initialized && greenworks && typeof greenworks.getFriendPersonaName === "function") {
             try {
                 hostName = greenworks.getFriendPersonaName(hostId) || "";
             } catch (e) {}
         }
 
-        // Create Client's dedicated Outbox Lobby so Client has permanent write permission for Client -> Host signals
         if (initialized && greenworks && isRealSteamLobbyId(currentLobbyId)) {
-            try {
-                clientOutboxLobbyId = await createSteamLobbyInternal(4, true);
-                if (clientOutboxLobbyId && typeof greenworks.setLobbyData === "function") {
-                    greenworks.setLobbyData(clientOutboxLobbyId, "host_lobby_id", currentLobbyId);
-                    if (hostId) greenworks.setLobbyData(clientOutboxLobbyId, "host_id", hostId);
-                    if (endpoints) greenworks.setLobbyData(clientOutboxLobbyId, "mp_endpoints", endpoints);
-                    logInfo(`Created client outbox lobby ${clientOutboxLobbyId} for host lobby ${currentLobbyId}`);
-                }
-            } catch (e) {}
-
             startLobbyPollTimer();
             pollLobbyChannel();
         }
@@ -1542,6 +1587,7 @@ function listen() {
         }
         const targetLobby = lobbyId || currentLobbyId || "";
         let sent = false;
+        ensureP2PSessionAccepted(normalizeSteamId(friendSteamId));
         try {
             if (targetLobby && isRealSteamLobbyId(targetLobby) && typeof greenworks.inviteUserToLobby === "function") {
                 sent = Boolean(greenworks.inviteUserToLobby(targetLobby, friendSteamId));
@@ -1557,14 +1603,28 @@ function listen() {
         if (!initialized || !greenworks || !data) {
             return { sent: false };
         }
-        const targetId = normalizeSteamId(friendSteamId || currentLobbyHostId || "host");
-        if (!targetId) {
-            return { sent: false };
-        }
         if (lobbyId && isRealSteamLobbyId(lobbyId) && !currentLobbyId) {
             currentLobbyId = normalizeSteamId(lobbyId);
         }
 
+        let targetId = normalizeSteamId(friendSteamId || currentLobbyHostId || "");
+        if ((!targetId || targetId === "host") && isRealSteamLobbyId(currentLobbyId)) {
+            const ownerId = getLobbyOwnerSteamId(currentLobbyId);
+            if (ownerId) {
+                targetId = ownerId;
+                if (lobbyRole === "client") currentLobbyHostId = ownerId;
+            }
+        }
+        if (!targetId) {
+            return { sent: false };
+        }
+
+        // Primary transport: Native Steamworks ISteamNetworking::SendP2PPacket
+        if (sendViaSteamP2P(targetId, data)) {
+            return { sent: true, transport: "steam-p2p" };
+        }
+
+        // Fallback transport (when native P2P is unavailable, e.g. in unit test mocks): Single-Lobby Metadata
         const queueKey = lobbyRole === "client" ? currentLobbyHostId || targetId : targetId;
         if (!txQueues.has(queueKey)) {
             txQueues.set(queueKey, []);
@@ -1581,7 +1641,7 @@ function listen() {
         if (!lobbyPollTimer && isRealSteamLobbyId(currentLobbyId)) {
             startLobbyPollTimer();
         }
-        return { sent: true, flushed, seq };
+        return { sent: true, flushed, seq, transport: "lobby-data" };
     });
 
     // ---- TCP / Direct / LAN Networking IPC Handlers ----
@@ -1688,6 +1748,8 @@ module.exports = {
     connectTcpClient,
     disconnectTcpClient,
     isRealSteamLobbyId,
+    steamIdToBuffer8,
+    loadNativeSteamP2P,
     encodeLobbyWindow,
     decodeLobbyWindow,
     LOG_FILE_PATH,

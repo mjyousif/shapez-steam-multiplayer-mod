@@ -18,6 +18,17 @@ const WORKSPACE_ROOT = path.resolve(__dirname, "..");
 const SRC_DIR = path.join(WORKSPACE_ROOT, "src");
 const SOURCE_MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
 const SOURCE_BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
+const SOURCE_P2P_NODE = path.join(SRC_DIR, "steam_p2p_win64.node");
+const TARGET_P2P_NODE = path.join(
+    GAME_RESOURCES_DIR,
+    "app.asar.unpacked",
+    "node_modules",
+    "shapez.io-private-artifacts",
+    "steam",
+    "lib",
+    "win64",
+    "steam_p2p_win64.node"
+);
 
 function computeIntegrity(buffer) {
     const hash = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -173,24 +184,32 @@ function main() {
 
     // 1. Create vanilla backup if it doesn't already exist
     if (!fs.existsSync(BACKUP_ASAR_PATH)) {
-        console.log("[1/3] Creating vanilla backup at:", BACKUP_ASAR_PATH);
+        console.log("[1/4] Creating vanilla backup at:", BACKUP_ASAR_PATH);
         fs.copyFileSync(ASAR_PATH, BACKUP_ASAR_PATH);
     } else {
-        console.log("[1/3] Using existing vanilla backup at:", BACKUP_ASAR_PATH);
+        console.log("[1/4] Using existing vanilla backup at:", BACKUP_ASAR_PATH);
     }
 
     // 2. Patch app.asar from clean vanilla backup
-    console.log("[2/3] Dynamically patching index.js, steam.js, and preload.js inside app.asar...");
+    console.log("[2/4] Dynamically patching index.js, steam.js, and preload.js inside app.asar...");
     patchAsarArchive(BACKUP_ASAR_PATH, ASAR_PATH);
     console.log("      Successfully updated:", ASAR_PATH);
 
-    // 3. Install steam_multiplayer.js into %APPDATA%\shapez.io\mods
-    console.log("[3/3] Installing mod to:", TARGET_MOD_FILE);
+    // 3. Install native Steam P2P bridge into app.asar.unpacked
+    if (fs.existsSync(SOURCE_P2P_NODE)) {
+        console.log("[3/4] Installing native Steam P2P bridge to:", TARGET_P2P_NODE);
+        fs.mkdirSync(path.dirname(TARGET_P2P_NODE), { recursive: true });
+        fs.copyFileSync(SOURCE_P2P_NODE, TARGET_P2P_NODE);
+    }
+
+    // 4. Install steam_multiplayer.js into %APPDATA%\shapez.io\mods
+    console.log("[4/4] Installing mod to:", TARGET_MOD_FILE);
     fs.mkdirSync(MODS_DIR, { recursive: true });
     fs.copyFileSync(SOURCE_MOD_FILE, TARGET_MOD_FILE);
 
     console.log("\nInstallation complete!");
     console.log(" - Patched Steam/IPC Bridge in:", ASAR_PATH);
+    console.log(" - Native Steam P2P Addon in:  ", TARGET_P2P_NODE);
     console.log(" - Installed Co-op Mod in:     ", TARGET_MOD_FILE);
     console.log(" - Vanilla Backup saved at:    ", BACKUP_ASAR_PATH);
 }
@@ -208,4 +227,5 @@ module.exports = {
     ASAR_PATH,
     BACKUP_ASAR_PATH,
     TARGET_MOD_FILE,
+    TARGET_P2P_NODE,
 };
