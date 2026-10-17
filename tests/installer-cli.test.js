@@ -48,6 +48,22 @@ describe("Installer CLI Smoke Tests", () => {
             return;
         }
 
+        const appData = process.env.APPDATA || (process.platform === "darwin"
+            ? path.join(process.env.HOME, "Library", "Application Support")
+            : path.join(process.env.HOME, ".local", "share"));
+        const shapezDir = path.join(appData, "shapez.io");
+        const savesDir = path.join(shapezDir, "saves");
+        const dummySave = path.join(savesDir, "ci_test_save.bin");
+        let dummyCreated = false;
+
+        if (!fs.existsSync(savesDir)) {
+            fs.mkdirSync(savesDir, { recursive: true });
+        }
+        if (fs.readdirSync(savesDir).length === 0) {
+            fs.writeFileSync(dummySave, "shapez_ci_test_save_data");
+            dummyCreated = true;
+        }
+
         try {
             const output = execFileSync(exePath, ["--backup"], {
                 encoding: "utf8",
@@ -55,13 +71,16 @@ describe("Installer CLI Smoke Tests", () => {
             });
             assert(output.includes("Backup successful") || output.includes("[shapez.io Co-op Installer]"));
 
-            const appData = process.env.APPDATA || path.join(process.env.HOME, ".local", "share");
-            const backupsDir = path.join(appData, "shapez.io", "backups");
+            const backupsDir = path.join(shapezDir, "backups");
             assert.ok(fs.existsSync(backupsDir), "Backups directory must exist");
             const zips = fs.readdirSync(backupsDir).filter(f => f.endsWith(".zip"));
             assert.ok(zips.length > 0, "At least one backup zip must be present");
         } catch (err) {
             assert.strictEqual(err.status, 0, "Installer --backup must exit with code 0");
+        } finally {
+            if (dummyCreated && fs.existsSync(dummySave)) {
+                try { fs.unlinkSync(dummySave); } catch {}
+            }
         }
     });
 });
