@@ -1,7 +1,7 @@
 # shapez.io — Steam Co-op Multiplayer Mod
 
 [![Release](https://img.shields.io/github/v/release/mjyousif/shapez-steam-multiplayer-mod?color=brightgreen&label=Latest%20Release)](https://github.com/mjyousif/shapez-steam-multiplayer-mod/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-blue)](https://store.steampowered.com/app/1318690/shapezio/)
 [![Tests](https://img.shields.io/badge/Tests-Passing-success)](scripts/verify-mod.js)
 
@@ -167,4 +167,13 @@ Full architectural and feature design documentation is available in the [`docs/`
     ├── steam_bridge.js         # Greenworks Steamworks IPC, TCP framing server & bridge
     └── installer/              # Standalone C# Windows installer GUI
 ```
+
+---
+
+## Legal & Trademark Notice
+
+* **License**: This project is licensed under the [GNU General Public License v3.0](LICENSE) (`GPL-3.0-or-later`).
+* **Disclaimer**: This is an independent, community-created modification and is not affiliated with, endorsed by, or sponsored by **tobspr Games** or **Prismatika**.
+* **Trademarks**: "shapez", "shapez.io", and related marks and logos are trademarks or registered trademarks of tobspr Games / Tobias Springer.
+
 
