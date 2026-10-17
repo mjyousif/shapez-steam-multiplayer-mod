@@ -549,9 +549,84 @@ async function verifyMainProcessAndModEndToEnd() {
     console.log("   [PASS] Bidirectional Action Sync (Place, Delete, Upgrades, Hub Goals, Cursors, Pings) verified.");
 }
 
+async function verifySteamLobbySignalingAndNoChatSpam() {
+    console.log("3. Verifying Steam Lobby signaling, WebRTC SDP/ICE serialization, and zero Friends Chat spam...");
+    const bridge = require("../src/steam_bridge");
+    const modExports = require("../src/steam_multiplayer");
+
+    // 1. Ensure steam_bridge.js never calls replyToFriendMessage (no Steam Friends Chat spam)
+    const bridgeSource = fs.readFileSync(path.resolve(__dirname, "..", "src", "steam_bridge.js"), "utf8");
+    assert(
+        !bridgeSource.includes("replyToFriendMessage("),
+        "steam_bridge.js must never call greenworks.replyToFriendMessage (no Steam chat spam)"
+    );
+
+    // 2. Verify isRealSteamLobbyId rejects 20-digit SteamAPICall_t handles and accepts real Steam Lobby IDs
+    assert.strictEqual(
+        bridge.isRealSteamLobbyId("15908673744893694395"),
+        false,
+        "20-digit SteamAPICall_t handle must be rejected by isRealSteamLobbyId"
+    );
+    assert.strictEqual(
+        bridge.isRealSteamLobbyId("76561198257732300"),
+        false,
+        "User SteamID64 must be rejected by isRealSteamLobbyId"
+    );
+    assert.strictEqual(
+        bridge.isRealSteamLobbyId("109775244914473292"),
+        true,
+        "Real 18-digit Steam Lobby ID must be accepted by isRealSteamLobbyId"
+    );
+
+    // 3. Verify serializeSdp and serializeIceCandidate extract prototype getters into plain JSON objects
+    const mockDomSdp = Object.create({
+        get type() {
+            return "offer";
+        },
+        get sdp() {
+            return "v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\na=candidate:1 1 UDP 2122252543 203.0.113.5 54321 typ srflx\r\n";
+        },
+    });
+    const plainSdp = modExports.serializeSdp(mockDomSdp);
+    assert(plainSdp && plainSdp.type === "offer" && plainSdp.sdp.includes("typ srflx"), "serializeSdp must preserve prototype getters");
+    assert.strictEqual(modExports.serializeSdp({}), null, "serializeSdp must reject empty {} SDP");
+
+    const mockDomIce = Object.create({
+        get candidate() {
+            return "candidate:1 1 UDP 2122252543 203.0.113.5 54321 typ srflx";
+        },
+        get sdpMid() {
+            return "0";
+        },
+        get sdpMLineIndex() {
+            return 0;
+        },
+    });
+    const plainIce = modExports.serializeIceCandidate(mockDomIce);
+    assert(plainIce && plainIce.candidate.includes("typ srflx"), "serializeIceCandidate must preserve prototype getters");
+    assert.strictEqual(modExports.serializeIceCandidate({}), null, "serializeIceCandidate must reject empty {} candidate");
+
+    // 4. Verify compressed Lobby Window round-trip
+    const sampleWindow = {
+        from: "76561198242237346",
+        ack: 4,
+        items: [
+            { seq: 5, data: { kind: "WEBRTC_OFFER", sdp: plainSdp } },
+            { seq: 6, data: { kind: "STEAM_PACKET", packet: { type: "HELLO", playerId: "76561198242237346" } } },
+        ],
+    };
+    const encoded = bridge.encodeLobbyWindow(sampleWindow);
+    assert(encoded.startsWith("Z:"), "Lobby window should be zlib-compressed with Z: prefix");
+    const decoded = bridge.decodeLobbyWindow(encoded);
+    assert.deepStrictEqual(decoded, sampleWindow, "decodeLobbyWindow must losslessly restore compressed window");
+
+    console.log("   [PASS] Steam Lobby ID validation, WebRTC SDP/ICE serialization, and zero Friends Chat spam verified.");
+}
+
 async function main() {
     await verifyAsarIntegrity();
     await verifyMainProcessAndModEndToEnd();
+    await verifySteamLobbySignalingAndNoChatSpam();
     console.log("\nALL VERIFICATION CHECKS PASSED SUCCESSFULLY!");
 }
 
