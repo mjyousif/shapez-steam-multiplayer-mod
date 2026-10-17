@@ -62,22 +62,18 @@ jobs:
             dist/shapez-steam-coop-mod-*.zip
             dist/SHA256SUMS.txt
 
-      # Rolling Continuous Release for Commits to master
-      - name: Publish Continuous Pre-Release (latest-dev)
+      # Automatic Latest Release for Commits to master
+      - name: Publish Latest Stable Release (master)
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/master'
         with:
-          tag_name: latest-dev
-          name: "Continuous Build (latest-dev)"
-          prerelease: true
+          tag_name: latest
+          name: "shapez Steam Co-op Mod (Latest)"
+          draft: false
+          prerelease: false
+          make_latest: true
           target_commitish: ${{ github.sha }}
-          body: |
-            ### ⚠️ Bleeding-Edge Continuous Build
-            This rolling release was automatically built from commit `${{ github.sha }}` on branch `master`.
-            
-            - **Installer:** Download `ShapezCoopInstaller.exe` below.
-            - **Manual Zip:** Download `shapez-steam-coop-mod-*.zip` below.
-            - **Integrity:** Verify with `SHA256SUMS.txt`.
+          generate_release_notes: true
           files: |
             dist/ShapezCoopInstaller.exe
             dist/shapez-steam-coop-mod-*.zip
