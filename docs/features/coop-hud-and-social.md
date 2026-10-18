@@ -37,7 +37,10 @@ Every player is assigned a unique color from the Co-op palette (Sky Blue, Rose, 
 
 ### 3.2 Ghost Building Previews
 When your teammate selects any building in their hotbar (e.g. Belt, Balancer, Cutter, Painter, Stack Operator) or rotates it:
-* The mod renders a **translucent ghost preview (40% opacity)** on your screen at their exact cursor position.
+* The mod renders a **native translucent blueprint ghost preview** on your screen at their exact cursor position.
+* **Accurate Rotated Bounds & Aspect Ratio**: Multi-tile buildings (such as 2x1 Balancers, Cutters, Painters, and Stackers) calculate rotated tile-space bounding boxes matching `shapez.StaticMapEntityComponent.getTileSpaceBounds()`, pivoting around the origin tile `(tileX * 32 + 16, tileY * 32 + 16)` rather than an unrotated box center, preventing aspect-ratio distortion or box misalignment.
+* **Native Blueprint Sprites & Rounded Outlines**: Previews utilize the game's native `getBlueprintSprite()` and atlas cache (`drawCached`) enclosed in a player-tinted rounded rectangle (`beginRoundedRect`), seamlessly matching shapez.io's built-in placement aesthetic.
+* **Layer Isolation**: Previews respect the active building layer (`regular` vs `wires`), ensuring wire components and regular machines are only visible on their corresponding layer.
 * You can see exactly what your friend is planning to build and where they are about to place it before they click.
 
 ### 3.3 Off-Screen Directional Tracking
