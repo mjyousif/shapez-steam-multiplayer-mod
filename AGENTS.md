@@ -78,9 +78,10 @@ The automated pipeline executes three distinct stages:
 
 * **Native P2P Addon (`src/steam_p2p_win64.node`)**:
   * Generated programmatically by [`scripts/build-native-p2p.js`](scripts/build-native-p2p.js) without external MSBuild/Visual Studio dependencies.
-  * If updating P2P exports or SteamNetworking bindings, rebuild using:
+  * Ignored by Git (`*.node`) and generated automatically on demand by `pretest`, `prepackage`, and installer scripts if not present on disk.
+  * Can be explicitly compiled using:
     ```powershell
-    node scripts/build-native-p2p.js
+    npm run build:native
     ```
 * **C# Windows Installer (`src/installer/Program.cs`)**:
   * Compiled via `scripts/build-dist.js` using `csc.exe` (.NET Framework 4.8).

@@ -196,6 +196,9 @@ function main() {
     console.log("      Successfully updated:", ASAR_PATH);
 
     // 3. Install native Steam P2P bridge into app.asar.unpacked
+    if (!fs.existsSync(SOURCE_P2P_NODE)) {
+        require("./build-native-p2p");
+    }
     if (fs.existsSync(SOURCE_P2P_NODE)) {
         console.log("[3/4] Installing native Steam P2P bridge to:", TARGET_P2P_NODE);
         fs.mkdirSync(path.dirname(TARGET_P2P_NODE), { recursive: true });

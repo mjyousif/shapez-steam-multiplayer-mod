@@ -562,6 +562,9 @@ async function verifySteamLobbySignalingAndNoChatSpam() {
 
     // 2. Verify native Steamworks P2P addon (steam_p2p_win64.node) exists, loads in Node, and exports all required methods
     const p2pNodePath = path.resolve(__dirname, "..", "src", "steam_p2p_win64.node");
+    if (!fs.existsSync(p2pNodePath)) {
+        require("./build-native-p2p");
+    }
     assert(fs.existsSync(p2pNodePath), "src/steam_p2p_win64.node must exist");
     const p2pAddon = bridge.loadNativeSteamP2P();
     assert(p2pAddon, "loadNativeSteamP2P() must load steam_p2p_win64.node");
