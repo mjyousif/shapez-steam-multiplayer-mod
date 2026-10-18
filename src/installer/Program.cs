@@ -8,6 +8,8 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Net;
+using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -293,6 +295,117 @@ namespace ShapezCoopInstaller
                 }
             }
             throw new Exception("Embedded resource not found: " + resourceName);
+        }
+
+        public static string GetEmbeddedModVersion()
+        {
+            try
+            {
+                byte[] bytes = GetEmbeddedFile("steam_multiplayer.js");
+                if (bytes != null && bytes.Length > 0)
+                {
+                    string content = Encoding.UTF8.GetString(bytes);
+                    var match = Regex.Match(content, @"version:\s*[""']([^""']+)[""']");
+                    if (match.Success) return match.Groups[1].Value.Trim();
+                }
+            }
+            catch { }
+            return "1.0.2";
+        }
+
+        public static string GetInstalledModVersion()
+        {
+            try
+            {
+                string path = GetModFilePath();
+                if (File.Exists(path))
+                {
+                    string content = File.ReadAllText(path);
+                    var match = Regex.Match(content, @"version:\s*[""']([^""']+)[""']");
+                    if (match.Success) return match.Groups[1].Value.Trim();
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        public static int CompareVersions(string vA, string vB)
+        {
+            if (string.IsNullOrEmpty(vA) && string.IsNullOrEmpty(vB)) return 0;
+            if (string.IsNullOrEmpty(vA)) return -1;
+            if (string.IsNullOrEmpty(vB)) return 1;
+
+            string sA = vA.TrimStart('v', 'V').Trim();
+            string sB = vB.TrimStart('v', 'V').Trim();
+
+            string[] partsA = sA.Split('.');
+            string[] partsB = sB.Split('.');
+            int maxLen = Math.Max(partsA.Length, partsB.Length);
+
+            for (int i = 0; i < maxLen; i++)
+            {
+                int numA = 0;
+                if (i < partsA.Length) int.TryParse(partsA[i], out numA);
+                int numB = 0;
+                if (i < partsB.Length) int.TryParse(partsB[i], out numB);
+
+                if (numA > numB) return 1;
+                if (numA < numB) return -1;
+            }
+            return 0;
+        }
+
+        public static bool CheckLatestRelease(out string latestVersion, out string releaseUrl, out string releaseName)
+        {
+            latestVersion = null;
+            releaseUrl = "https://github.com/mjyousif/shapez-steam-multiplayer-mod/releases/latest";
+            releaseName = null;
+            try
+            {
+                // Ensure TLS 1.2 is enabled in .NET 4.x
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)768 | SecurityProtocolType.Tls;
+
+                var req = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/mjyousif/shapez-steam-multiplayer-mod/releases/latest");
+                req.Method = "GET";
+                req.UserAgent = "shapez-steam-multiplayer-installer";
+                req.Timeout = 5000;
+                req.ReadWriteTimeout = 5000;
+                req.Accept = "application/vnd.github.v3+json";
+
+                using (var resp = (HttpWebResponse)req.GetResponse())
+                using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                {
+                    string json = reader.ReadToEnd();
+                    var serializer = new JavaScriptSerializer();
+                    var dict = serializer.Deserialize<Dictionary<string, object>>(json);
+                    if (dict != null)
+                    {
+                        if (dict.ContainsKey("tag_name") && dict["tag_name"] != null)
+                        {
+                            string tag = dict["tag_name"].ToString().Trim();
+                            if (tag.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+                            {
+                                tag = tag.Substring(1);
+                            }
+                            latestVersion = tag;
+                        }
+                        if (dict.ContainsKey("html_url") && dict["html_url"] != null)
+                        {
+                            releaseUrl = dict["html_url"].ToString().Trim();
+                        }
+                        if (dict.ContainsKey("name") && dict["name"] != null)
+                        {
+                            releaseName = dict["name"].ToString().Trim();
+                        }
+                        return !string.IsNullOrEmpty(latestVersion);
+                    }
+                }
+            }
+            catch
+            {
+                // Network error, offline, or rate limited — fail gracefully
+            }
+            return false;
         }
 
         public static bool IsAsarPatched(string shapezDir)
@@ -688,11 +801,59 @@ namespace ShapezCoopInstaller
         private Button btnBackup;
         private Button btnOpenSaves;
         private Button btnOpenBackups;
+        private Button btnUpdateNotice;
+        private string latestReleaseUrl;
 
         public MainForm()
         {
             InitUI();
             RefreshStatus();
+            CheckForUpdatesAsync();
+        }
+
+        private void CheckForUpdatesAsync()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string latestVer, relUrl, relName;
+                if (InstallerLogic.CheckLatestRelease(out latestVer, out relUrl, out relName))
+                {
+                    string currentVer = InstallerLogic.GetEmbeddedModVersion();
+                    if (InstallerLogic.CompareVersions(latestVer, currentVer) > 0)
+                    {
+                        latestReleaseUrl = relUrl;
+                        try
+                        {
+                            if (!IsDisposed)
+                            {
+                                BeginInvoke(new Action(() =>
+                                {
+                                    btnUpdateNotice.Text = "★ Update v" + latestVer + " Available!";
+                                    btnUpdateNotice.Visible = true;
+                                    AppendLog(string.Format("\n[Update Available] A newer release (v{0}) is available on GitHub!", latestVer));
+                                    if (!string.IsNullOrEmpty(relName)) AppendLog("Release: " + relName);
+                                    AppendLog("Click the amber button above or visit: " + relUrl + "\n");
+                                }));
+                            }
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            if (!IsDisposed)
+                            {
+                                BeginInvoke(new Action(() =>
+                                {
+                                    AppendLog(string.Format("[Update Check] You have the latest release (v{0}).", currentVer));
+                                }));
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            });
         }
 
         private void InitUI()
@@ -715,6 +876,28 @@ namespace ShapezCoopInstaller
                 AutoSize = true
             };
             Controls.Add(lblHeader);
+
+            btnUpdateNotice = new Button
+            {
+                Location = new Point(380, 15),
+                Size = new Size(200, 28),
+                BackColor = Color.FromArgb(254, 243, 199),
+                ForeColor = Color.FromArgb(146, 64, 14),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Visible = false
+            };
+            btnUpdateNotice.FlatAppearance.BorderColor = Color.FromArgb(245, 158, 11);
+            btnUpdateNotice.FlatAppearance.BorderSize = 1;
+            btnUpdateNotice.Click += (s, e) =>
+            {
+                string url = !string.IsNullOrEmpty(latestReleaseUrl)
+                    ? latestReleaseUrl
+                    : "https://github.com/mjyousif/shapez-steam-multiplayer-mod/releases/latest";
+                try { Process.Start(url); } catch { }
+            };
+            Controls.Add(btnUpdateNotice);
 
             var lblSub = new Label
             {
@@ -899,9 +1082,21 @@ namespace ShapezCoopInstaller
                     break;
 
                 case InstallStatus.FullyInstalled:
-                    lblStatus.Text = "Status: Steam Co-op Multiplayer Mod is currently installed! (v1.0.0)";
-                    lblStatus.ForeColor = Color.FromArgb(30, 130, 60);
-                    btnInstall.Text = "Reinstall / Update";
+                    string installedVer = InstallerLogic.GetInstalledModVersion();
+                    string embeddedVer = InstallerLogic.GetEmbeddedModVersion();
+                    if (!string.IsNullOrEmpty(installedVer) && InstallerLogic.CompareVersions(embeddedVer, installedVer) > 0)
+                    {
+                        lblStatus.Text = string.Format("Status: Mod v{0} installed (Update v{1} ready to deploy!)", installedVer, embeddedVer);
+                        lblStatus.ForeColor = Color.FromArgb(204, 102, 0);
+                        btnInstall.Text = "Update to v" + embeddedVer;
+                    }
+                    else
+                    {
+                        string verDisplay = !string.IsNullOrEmpty(installedVer) ? installedVer : embeddedVer;
+                        lblStatus.Text = string.Format("Status: Steam Co-op Multiplayer Mod is currently installed! (v{0})", verDisplay);
+                        lblStatus.ForeColor = Color.FromArgb(30, 130, 60);
+                        btnInstall.Text = "Reinstall Mod";
+                    }
                     btnInstall.Enabled = true;
                     btnUninstall.Enabled = true;
                     break;
@@ -1142,6 +1337,7 @@ namespace ShapezCoopInstaller
             bool isSilent = false;
             bool isUninstall = false;
             bool isBackup = false;
+            bool isCheckUpdate = false;
             string customPath = null;
 
             for (int i = 0; i < args.Length; i++)
@@ -1150,27 +1346,58 @@ namespace ShapezCoopInstaller
                 if (a == "--help" || a == "-h" || a == "/?" || a == "-?")
                 {
                     AttachConsole(ATTACH_PARENT_PROCESS);
-                    Console.WriteLine("\nshapez.io Steam Co-op Multiplayer Installer v1.0.0");
+                    Console.WriteLine(string.Format("\nshapez.io Steam Co-op Multiplayer Installer v{0}", InstallerLogic.GetEmbeddedModVersion()));
                     Console.WriteLine("Usage: ShapezCoopInstaller.exe [options]");
                     Console.WriteLine("  --silent, -s       Install mod and patches quietly without UI");
                     Console.WriteLine("  --uninstall, -u    Uninstall mod and restore vanilla shapez.io");
                     Console.WriteLine("  --backup, -b       Create a timestamped .zip backup of shapez saves");
+                    Console.WriteLine("  --check-update     Check GitHub for newer releases and updates");
                     Console.WriteLine("  --path <dir>       Specify custom shapez.io installation path");
+                    Console.WriteLine("  --version, -v      Print current mod installer version");
                     Console.WriteLine("  --help, -h         Show this help message");
                     return 0;
                 }
                 else if (a == "--version" || a == "-v")
                 {
                     AttachConsole(ATTACH_PARENT_PROCESS);
-                    Console.WriteLine("1.0.2");
+                    Console.WriteLine(InstallerLogic.GetEmbeddedModVersion());
                     return 0;
                 }
+                else if (a == "--check-update" || a == "-c") isCheckUpdate = true;
                 else if (a == "--backup" || a == "--backup-saves" || a == "-b") isBackup = true;
                 else if (a == "--silent" || a == "-s" || a == "/silent") isSilent = true;
                 else if (a == "--uninstall" || a == "-u" || a == "/uninstall") isUninstall = true;
                 else if (a == "--path" && i + 1 < args.Length)
                 {
                     customPath = args[++i];
+                }
+            }
+
+            if (isCheckUpdate)
+            {
+                AttachConsole(ATTACH_PARENT_PROCESS);
+                string currentVer = InstallerLogic.GetEmbeddedModVersion();
+                Console.WriteLine(string.Format("\n[shapez.io Co-op Installer] Checking for updates... (Current: v{0})", currentVer));
+                string latestVer, relUrl, relName;
+                if (InstallerLogic.CheckLatestRelease(out latestVer, out relUrl, out relName))
+                {
+                    if (InstallerLogic.CompareVersions(latestVer, currentVer) > 0)
+                    {
+                        Console.WriteLine(string.Format("[UPDATE AVAILABLE] A newer release (v{0}) is available on GitHub!", latestVer));
+                        if (!string.IsNullOrEmpty(relName)) Console.WriteLine("Release Title: " + relName);
+                        Console.WriteLine("Download / Changelog: " + relUrl);
+                        return 0;
+                    }
+                    else
+                    {
+                        Console.WriteLine(string.Format("[OK] You are running the latest version (v{0}).", currentVer));
+                        return 0;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("[NOTICE] Could not check GitHub for updates (network offline or rate-limited).");
+                    return 0;
                 }
             }
 

@@ -83,4 +83,22 @@ describe("Installer CLI Smoke Tests", () => {
             }
         }
     });
+
+    test("installer binary responds to --check-update", () => {
+        if (!fs.existsSync(exePath)) {
+            console.log("   [SKIP] ShapezCoopInstaller.exe not yet compiled; skipping binary smoke test.");
+            return;
+        }
+
+        try {
+            const output = execFileSync(exePath, ["--check-update"], {
+                encoding: "utf8",
+                timeout: 10000,
+            });
+            assert(output.includes("Checking for updates") || output.includes("[shapez.io Co-op Installer]"));
+        } catch (err) {
+            assert.strictEqual(err.status, 0, "Installer --check-update must exit with code 0");
+        }
+    });
 });
+

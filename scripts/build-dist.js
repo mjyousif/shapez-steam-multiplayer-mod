@@ -108,9 +108,11 @@ pause
 `;
     fs.writeFileSync(path.join(DIST_DIR, "Uninstall-Mod.bat"), uninstallBat, "utf8");
 
+    const pkg = require(path.join(ROOT_DIR, "package.json"));
+
     // 4. Generate HOW-TO-INSTALL.txt
     const readmeTxt = `========================================================================
-             shapez.io — Steam Co-op Multiplayer Mod (v1.0.0)
+             shapez.io — Steam Co-op Multiplayer Mod (v${pkg.version})
 ========================================================================
 
 HOW TO INSTALL (Takes 5 seconds):
@@ -144,7 +146,7 @@ SAVE GAMES & BACKUPS:
 - To create a timestamped backup archive of your saves at any time:
   - Click "Backup Saves (.zip)" in ShapezCoopInstaller.exe, OR
   - Run "ShapezCoopInstaller.exe --backup"
-  Backups are saved to %APPDATA%\shapez.io\backups\.
+  Backups are saved to %APPDATA%\\shapez.io\\backups\\.
 
 ------------------------------------------------------------------------
 HOW TO UNINSTALL / RESTORE VANILLA:
@@ -157,7 +159,7 @@ Your original unmodded game files are 100% restored.
     fs.writeFileSync(path.join(DIST_DIR, "HOW-TO-INSTALL.txt"), readmeTxt, "utf8");
 
     // 5. Create distribution zip
-    const zipName = "shapez-steam-coop-mod-v1.0.0.zip";
+    const zipName = `shapez-steam-coop-mod-v${pkg.version}.zip`;
     const zipPath = path.join(DIST_DIR, zipName);
     if (fs.existsSync(zipPath)) {
         fs.unlinkSync(zipPath);
