@@ -236,33 +236,114 @@ function drawWorldSpacePeers(mod, root, parameters) {
         if (rp.buildingId) {
             try {
                 const metaBuilding = shapez.gMetaBuildingRegistry.findById(rp.buildingId);
-                if (metaBuilding) {
+                const buildingLayer = metaBuilding?.getLayer ? metaBuilding.getLayer() : (rp.layer || "regular");
+                const currentLayer = root.currentLayer || "regular";
+
+                if (metaBuilding && buildingLayer === currentLayer) {
                     const tileX = Math.floor(rp.renderX / 32);
                     const tileY = Math.floor(rp.renderY / 32);
-                    const dims = metaBuilding.getDimensions(rp.variant || shapez.defaultBuildingVariant);
-                    const worldTileX = tileX * 32;
-                    const worldTileY = tileY * 32;
-                    const w = (dims?.x || 1) * 32;
-                    const h = (dims?.y || 1) * 32;
+                    const variant = rp.variant || shapez.defaultBuildingVariant;
+                    const rotationVariant = rp.rotationVariant || 0;
+                    const rawRotation = rp.rotation || 0;
+                    const rotation = ((Math.round(rawRotation / 90) * 90) % 360 + 360) % 360;
+                    const dims = metaBuilding.getDimensions(variant) || new shapez.Vector(1, 1);
 
-                    ctx.save();
-                    ctx.globalAlpha = 0.38;
-                    ctx.fillStyle = rp.color;
-                    ctx.strokeStyle = rp.color;
-                    ctx.lineWidth = 2;
-                    ctx.fillRect(worldTileX, worldTileY, w, h);
-                    ctx.strokeRect(worldTileX, worldTileY, w, h);
+                    // Calculate tile-space bounds taking building rotation into account
+                    // Matches shapez.StaticMapEntityComponent.getTileSpaceBounds
+                    let boundsX = tileX;
+                    let boundsY = tileY;
+                    let boundsW = dims.x;
+                    let boundsH = dims.y;
 
-                    const sprite = metaBuilding.getPreviewSprite(
-                        rp.rotationVariant || 0,
-                        rp.variant || shapez.defaultBuildingVariant
-                    );
-                    if (sprite) {
-                        ctx.translate(worldTileX + w / 2, worldTileY + h / 2);
-                        ctx.rotate(((rp.rotation || 0) * Math.PI) / 180);
-                        sprite.drawCentered(ctx, 0, 0, Math.max(w, h));
+                    switch (rotation) {
+                        case 90:
+                            boundsX = tileX - dims.y + 1;
+                            boundsY = tileY;
+                            boundsW = dims.y;
+                            boundsH = dims.x;
+                            break;
+                        case 180:
+                            boundsX = tileX - dims.x + 1;
+                            boundsY = tileY - dims.y + 1;
+                            boundsW = dims.x;
+                            boundsH = dims.y;
+                            break;
+                        case 270:
+                            boundsX = tileX;
+                            boundsY = tileY - dims.x + 1;
+                            boundsW = dims.y;
+                            boundsH = dims.x;
+                            break;
                     }
-                    ctx.restore();
+
+                    const worldBoxX = boundsX * 32;
+                    const worldBoxY = boundsY * 32;
+                    const worldBoxW = boundsW * 32;
+                    const worldBoxH = boundsH * 32;
+
+                    // Check visibility within camera viewport
+                    const isVisible = parameters.visibleRect
+                        ? parameters.visibleRect.containsRect4Params(worldBoxX, worldBoxY, worldBoxW, worldBoxH)
+                        : true;
+
+                    if (isVisible) {
+                        ctx.save();
+
+                        // Subtle player-tinted rounded placement bounds
+                        ctx.fillStyle = rp.color;
+                        ctx.strokeStyle = rp.color;
+                        ctx.lineWidth = 1.5;
+
+                        if (typeof ctx.beginRoundedRect === "function") {
+                            ctx.globalAlpha = 0.16;
+                            ctx.beginRoundedRect(worldBoxX + 2, worldBoxY + 2, worldBoxW - 4, worldBoxH - 4, 4);
+                            ctx.fill();
+                            ctx.globalAlpha = 0.65;
+                            ctx.stroke();
+                        } else {
+                            ctx.globalAlpha = 0.16;
+                            ctx.fillRect(worldBoxX + 2, worldBoxY + 2, worldBoxW - 4, worldBoxH - 4);
+                            ctx.globalAlpha = 0.65;
+                            ctx.strokeRect(worldBoxX + 2, worldBoxY + 2, worldBoxW - 4, worldBoxH - 4);
+                        }
+
+                        // Prefer native blueprint ghost sprite, fallback to preview sprite
+                        const sprite =
+                            (typeof metaBuilding.getBlueprintSprite === "function"
+                                ? metaBuilding.getBlueprintSprite(rotationVariant, variant)
+                                : null) ||
+                            (typeof metaBuilding.getPreviewSprite === "function"
+                                ? metaBuilding.getPreviewSprite(rotationVariant, variant)
+                                : null);
+
+                        if (sprite) {
+                            ctx.globalAlpha = 0.55;
+
+                            const spriteW = dims.x * 32;
+                            const spriteH = dims.y * 32;
+
+                            if (rotation === 0) {
+                                if (typeof sprite.drawCached === "function") {
+                                    sprite.drawCached(parameters, tileX * 32, tileY * 32, spriteW, spriteH);
+                                } else if (typeof sprite.draw === "function") {
+                                    sprite.draw(ctx, tileX * 32, tileY * 32, spriteW, spriteH);
+                                }
+                            } else {
+                                const pivotX = tileX * 32 + 16;
+                                const pivotY = tileY * 32 + 16;
+                                ctx.translate(pivotX, pivotY);
+                                ctx.rotate((rotation * Math.PI) / 180);
+
+                                if (typeof sprite.drawCached === "function") {
+                                    sprite.drawCached(parameters, -16, -16, spriteW, spriteH, false);
+                                } else if (typeof sprite.draw === "function") {
+                                    sprite.draw(ctx, -16, -16, spriteW, spriteH);
+                                }
+                            }
+                        }
+
+                        ctx.restore();
+                    }
                 }
             } catch {}
         }
