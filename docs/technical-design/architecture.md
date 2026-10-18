@@ -185,14 +185,15 @@ flowchart TD
         M4["sync/world_dump.js (48 KB Sliced World Serialization)"]
         M5["sync/actions.js (Remote Action Dispatch & Guards)"]
         M6["sync/hub_sync.js (Hub Goals & Upgrades Sync)"]
-        M7["sync/cursors.js (Interpolation, Ghosts, Radar Pings)"]
-        M8["sync/game_hooks.js (GameLogic & HUD Hooks)"]
-        M9["ui/styles.js (CSS Injection)"]
-        M10["ui/dialogs.js (Menu Buttons, Modals & Toasts)"]
-        M11["mod.js (Central Mod Controller)"]
-        M12["index.js (Barrel Exporter)"]
+        M7["sync/world_check.js (Spatial Region Checksums & Auto-Repair)"]
+        M8["sync/cursors.js (Interpolation, Ghosts, Radar Pings)"]
+        M9["sync/game_hooks.js (GameLogic & HUD Hooks)"]
+        M10["ui/styles.js (CSS Injection)"]
+        M11["ui/dialogs.js (Menu Buttons, Modals & Toasts)"]
+        M12["mod.js (Central Mod Controller)"]
+        M13["index.js (Barrel Exporter)"]
 
-        M1 & M2 & M3 & M4 & M5 & M6 & M7 & M8 & M9 & M10 --> M11 --> M12
+        M1 & M2 & M3 & M4 & M5 & M6 & M7 & M8 & M9 & M10 & M11 & M12 --> M13
     end
 
     subgraph Bundler["Bundler (scripts/build-bundle.js)"]
@@ -223,7 +224,8 @@ flowchart TD
 * **`hud/hud_multiplayer.js`**: The `HUDMultiplayer` class implementing the draggable in-game roster, player status badges, quick actions, and real-time chat log.
 * **`sync/world_dump.js`**: Serializes full game state, manages 48 KB chunk transfers (`WELCOME_WORLD`), and handles isolated savegame allocation.
 * **`sync/actions.js`**: Remote action dispatcher (`applyRemoteAction`) with reentrancy guards (`isApplyingRemote`).
-* **`sync/hub_sync.js`**: Synchronizes hub level completions, pinned shapes, and tech tree upgrades.
+* **`sync/hub_sync.js`**: Authoritative hub level completions, pinned shapes, optimistic upgrade prediction, and geometric multiplier recalculation.
+* **`sync/world_check.js`**: 16x16 chunk spatial bucketing, deterministic FNV-1a checksum calculation, and surgical region delta repair.
 * **`sync/cursors.js`**: Low-latency remote cursor interpolation, ghost building previews, radar pings (<kbd>P</kbd>), and screen-edge directional indicators.
 * **`sync/game_hooks.js`**: Hooks `shapez.GameLogic` methods (`tryPlaceBuilding`, `tryDeleteBuilding`, etc.) with `isInsidePlaceBuilding` recursion protection.
 * **`ui/styles.js`**: Defines and dynamically injects the mod's complete responsive CSS stylesheet into the DOM.

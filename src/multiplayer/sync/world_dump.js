@@ -133,6 +133,8 @@ function sendWorldWelcomeToPeer(mod, peer) {
             assignedColor: peer.color,
             mode: mod.mode,
             roster: mod.buildRosterPayload(),
+            actionSeq: mod.actionSeq || 0,
+            hubSeq: mod.hubSeq || 0,
             dump,
         });
     } catch (err) {
@@ -158,6 +160,7 @@ async function loadHostWorldDump(mod, worldDump, hostName) {
     setTimeout(() => {
         mod.closeJoinProgressModal();
         mod.isConnecting = false;
+        mod.isReloadingWorld = false;
     }, 12000);
 
     // Architectural Invariant: Never overwrite client singleplayer saves
@@ -188,10 +191,29 @@ async function loadHostWorldDump(mod, worldDump, hostName) {
         console.warn("[Steam MP] Failed to write initial co-op savegame:", e);
     }
 
-    mod.app.stateMgr.moveToState("InGameState", {
-        savegame,
-        fastEnter: true,
-    });
+    // Reset client-side progression sync counters to align with new dump
+    mod.lastHubSeq = 0;
+    if (mod.pendingUpgrades) {
+        mod.pendingUpgrades.clear();
+    }
+
+    const enterInGame = () => {
+        mod.app.stateMgr.moveToState("InGameState", {
+            savegame,
+            fastEnter: true,
+        });
+    };
+
+    const activeState = mod.app.stateMgr && mod.app.stateMgr.currentState;
+    if (activeState && activeState.key === "InGameState") {
+        // StateManager rejects moveToState("InGameState") if already active.
+        // Cycle cleanly through MainMenuState under isReloadingWorld guard to bypass termination.
+        mod.isReloadingWorld = true;
+        mod.pendingWorldEntry = enterInGame;
+        mod.app.stateMgr.moveToState("MainMenuState");
+    } else {
+        enterInGame();
+    }
 }
 
 module.exports = {

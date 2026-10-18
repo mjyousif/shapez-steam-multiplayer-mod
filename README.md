@@ -24,9 +24,10 @@ A real-time Co-op Multiplayer mod for the Steam version of **shapez.io** (`v1.5.
 - **Full Co-op Factory Synchronization**:
   - **Initial World Transfer**: Automatically serializes and streams the Host's factory (in 48 KB chunks) to joining players.
   - **Real-Time Building & Wire Sync**: Syncs single placements, belt/wire drags, blueprint pastes, deletions, mass-deletes, belt clearing, constant signal edits, and lever toggles.
-  - **Shared Hub & Upgrades**: Syncs Hub shape deliveries, level progression, upgrade unlocks, map waypoints, and pinned shapes.
+  - **Authoritative Hub & Upgrades**: Host-authoritative tech tree progression with instant client-side prediction, exact geometric multiplier recalculation, and level synchronization.
+  - **Background Checksum Self-Healing**: Periodic 16x16 chunk FNV-1a checksums detect any potential drift and surgically repair affected chunks in the background without requiring a reload.
 - **Live Co-op HUD**:
-  - Draggable HUD panel, smooth roster/chat scrolling, live player cursors with multi-instance disambiguation, Steam names, active layer (`Regular` / `[Wires]`), translucent ghost building previews, off-screen arrows, map pings (<kbd>P</kbd>), and in-game chat.
+  - Draggable HUD panel, smooth roster/chat scrolling, live player cursors with multi-instance disambiguation, Steam names, active layer (`Regular` / `[Wires]`), translucent ghost building previews, off-screen arrows, map pings (<kbd>P</kbd>), seamless in-game Resync, and in-game chat.
 
 ---
 
@@ -119,7 +120,7 @@ You can test Hosting and Joining on the same computer using two side-by-side win
 | **Invite Friends** | Open the Steam Multiplayer modal to invite friends or switch sessions |
 | **Copy Code** | Copy your session Join Code to the clipboard |
 | **Ping `[P]`** (or press <kbd>P</kbd>) | Send an animated radar ping at your cursor's map coordinates |
-| **Resync** *(Client only)* | Request a fresh full-world snapshot from the Host if ever needed |
+| **Resync** *(Client only)* | Request a fresh full-world snapshot from the Host and reload seamlessly in-game |
 | **Chat Box** (<kbd>Enter</kbd>) | Send a chat message to all connected players (smooth autoscrolling) |
 
 ---
@@ -130,7 +131,7 @@ You can test Hosting and Joining on the same computer using two side-by-side win
 | :--- | :--- |
 | `npm test` | Runs the full test suite: syntax validation, unit tests, and E2E simulation |
 | `npm run check:syntax` | Static AST syntax verification on all JS scripts and source files |
-| `npm run test:unit` | Executes 8 unit test suites via Node's native test runner (`node --test`) |
+| `npm run test:unit` | Executes 10 unit test suites via Node's native test runner (`node --test`) |
 | `npm run test:e2e` / `npm run verify` | Runs the automated ASAR integrity & Host-to-Client verification suite |
 | `npm run package` / `npm run build-dist` | Builds standalone `ShapezCoopInstaller.exe` and distribution ZIP |
 | `npm run backup-saves` | Creates a timestamped `.zip` backup of `%APPDATA%\shapez.io\saves` |
@@ -199,10 +200,13 @@ Full architectural and feature design documentation is available in the [`docs/`
     ├── asar-patcher.test.js    # ASAR header parsing and patching tests
     ├── dist-package.test.js    # Package distribution bundle tests
     ├── framing.test.js         # TCP 4-byte BE framing protocol tests
+    ├── hub-sync.test.js        # Authoritative hub progression & prediction reconciliation
     ├── installer-cli.test.js   # Installer binary CLI smoke tests
     ├── join-code.test.js       # Join code serialization & security tests
     ├── network-resilience.test.js # Buffer resilience, chunking, and port failover tests
-    └── savegame-isolation.test.js # Client singleplayer save protection tests
+    ├── savegame-isolation.test.js # Client singleplayer save protection tests
+    ├── version-check.test.js   # Semver invariants and repository version synchronization
+    └── world-check.test.js     # Spatial region FNV-1a checksums & self-healing repair
 ```
 
 ---

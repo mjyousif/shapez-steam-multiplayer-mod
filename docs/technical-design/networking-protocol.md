@@ -166,32 +166,53 @@ The client stores received slices inside `clientChunkBuffer`. Once all slices (`
 
 ---
 
-## 4. Packet Schema Reference
+## 4. Protocol Versioning & Handshake
+
+To ensure forward and backward compatibility and prevent desyncs from mixed mod versions, the networking engine defines `PROTOCOL_VERSION = 2` (introduced in v1.1.0):
+
+1. **Client Handshake (`HELLO`)**: When establishing a session, the client transmits `{ type: "HELLO", protocolVersion: 2, modVersion, steamId, name }`.
+2. **Version Negotiation**: The Host inspects `msg.protocolVersion`. If the client's protocol version differs from the Host's `PROTOCOL_VERSION`:
+   - The Host sends `{ type: "REJECT", reason: "Version mismatch: Host protocol vX vs Client protocol vY" }`.
+   - The connection is cleanly terminated with a descriptive toast prompt advising the player to update via the installer.
+3. **World Dump Baseline (`WELCOME_WORLD`)**: The Host stamps the snapshot with `hubSeq: 1` and `actionSeq: 0`.
+
+---
+
+## 5. Packet Schema Reference
 
 All messages dispatched between Host and Clients share a common `type` property:
 
 | Packet `type` | Direction | Description | Key Fields |
 | :--- | :--- | :--- | :--- |
-| `WELCOME_WORLD` | Host &rarr; Client | Initial factory snapshot on connection | `hostId`, `hostName`, `assignedColor`, `mode`, `roster`, `dump` |
+| `HELLO` | Client &rarr; Host | Initial handshake upon socket open | `protocolVersion`, `modVersion`, `steamId`, `name` |
+| `REJECT` | Host &rarr; Client | Handshake rejected due to protocol mismatch | `reason` |
+| `WELCOME_WORLD` | Host &rarr; Client | Initial factory snapshot on connection or resync | `hostId`, `hostName`, `assignedColor`, `mode`, `roster`, `dump`, `actionSeq`, `hubSeq` |
 | `CHUNK_PART` | Host &harr; Client | 48 KB fragment of a large packet | `transferId`, `index`, `total`, `data` |
 | `ROSTER_UPDATE` | Host &rarr; All | Connected player roster & colors | `players: [{ id, name, color, isHost }]` |
 | `CURSOR` | Both directions | Player cursor position & active layer | `senderId`, `name`, `x`, `y`, `layer`, `buildingId`, `variant`, `rotation`, `rotationVariant` |
-| `ACT_PLACE` | Both directions | Building, belt, or wire placed | `x`, `y`, `rotation`, `originalRotation`, `rotationVariant`, `variant`, `buildingId` |
-| `ACT_DELETE` | Both directions | Building or wire deleted | `x`, `y`, `layer` |
-| `ACT_SIGNAL` | Both directions | Constant signal code modified | `x`, `y`, `layer`, `signalCode` |
-| `ACT_LEVER` | Both directions | Logic lever toggled | `x`, `y`, `toggled` |
-| `ACT_CLEAR_BELTS` | Both directions | Mass selector cleared items from belts | `tiles: [{ x, y, layer }]` |
-| `ACT_UPGRADE` | Both directions | Hub tier upgrade unlocked | `upgradeId` |
+| `ACT_PLACE` | Both directions | Building, belt, or wire placed | `x`, `y`, `rotation`, `originalRotation`, `rotationVariant`, `variant`, `buildingId`, `actionSeq` |
+| `ACT_DELETE` | Both directions | Building or wire deleted | `x`, `y`, `layer`, `actionSeq` |
+| `ACT_SIGNAL` | Both directions | Constant signal code modified | `x`, `y`, `layer`, `signalCode`, `actionSeq` |
+| `ACT_LEVER` | Both directions | Logic lever toggled | `x`, `y`, `toggled`, `actionSeq` |
+| `ACT_CLEAR_BELTS` | Both directions | Mass selector cleared items from belts | `tiles: [{ x, y, layer }]`, `actionSeq` |
+| `REQUEST_UPGRADE` | Client &rarr; Host | Client requests tech tree upgrade unlock | `upgradeId` |
+| `SYNC_HUB` | Host &rarr; Client | Authoritative hub level, throughput & upgrade sync | `level`, `deliveredShapes`, `upgradeLevels`, `seq`, `ackReq` |
+| `SYNC_CHECK` | Host &rarr; Client | Periodic FNV-1a world checksum broadcast | `rootHash`, `actionSeq` |
+| `REQUEST_REGION_HASHES` | Client &rarr; Host | Client queries 16x16 chunk region hashes on checksum drift | `{ type: "REQUEST_REGION_HASHES" }` |
+| `REGION_HASHES` | Host &rarr; Client | Host transmits dictionary of region hashes | `regionHashes: { "rx,ry": "hash" }` |
+| `REQUEST_REGIONS` | Client &rarr; Host | Client requests targeted entity data for drifting regions | `regions: ["rx,ry", ...]` |
+| `REGION_DATA` | Host &rarr; Client | Host provides entities to repair mismatched regions | `regions: { "rx,ry": [entities] }` |
 | `ACT_WAYPOINTS` | Both directions | Map waypoint added, renamed, or deleted | `data: serializedWaypoints` |
 | `ACT_PINS` | Both directions | Pinned shape formula modified | `data: serializedPins` |
-| `SYNC_HUB` | Host &rarr; Client | Periodic hub shapes and level sync | `level`, `deliveredShapes`, `upgradeLevels` |
-| `REQUEST_RESYNC` | Client &rarr; Host | Client requesting fresh world snapshot | `{ type: "REQUEST_RESYNC" }` |
+| `REQUEST_RESYNC` | Client &rarr; Host | Client requesting full fresh world reload | `{ type: "REQUEST_RESYNC" }` |
 | `CHAT` | Both directions | Chat message sent | `senderName`, `color`, `text` |
 | `PING` | Both directions | Animated map ping coordinate | `senderName`, `color`, `x`, `y`, `time` |
 
+*(Note: Legacy `ACT_UPGRADE` is deprecated and superseded by `REQUEST_UPGRADE` + `SYNC_HUB` to avoid race conditions and double-increments).*
+
 ---
 
-## 5. Session Codes & Addressing
+## 6. Session Codes & Addressing
 
 The mod provides two representations of session connection details:
 

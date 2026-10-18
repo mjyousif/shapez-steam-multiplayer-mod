@@ -23,7 +23,7 @@ The Co-op HUD is embedded at the top-center of the screen during gameplay (`HUDM
   * **Invite Friends**: Opens the Steam Multiplayer modal / Steam Overlay.
   * **Copy Code**: Copies the session Join Code directly to the clipboard.
   * **Ping `[P]`**: Sends an animated radar map ping at your current mouse cursor coordinates.
-  * **Resync** *(Client only)*: Requests a fresh factory snapshot from the Host.
+  * **Resync** *(Client only)*: Requests a fresh factory snapshot from the Host and seamlessly reloads the world in-game without disconnecting or returning to the main menu.
 
 ---
 

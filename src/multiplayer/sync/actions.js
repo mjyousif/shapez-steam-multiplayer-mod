@@ -44,6 +44,10 @@ function applyRemoteAction(mod, msg) {
         return;
     }
 
+    if (typeof msg.actionSeq === "number") {
+        mod.lastAppliedActionSeq = Math.max(mod.lastAppliedActionSeq || 0, msg.actionSeq);
+    }
+
     const root = mod.currentRoot;
     mod.isApplyingRemote = true;
 
@@ -105,18 +109,6 @@ function applyRemoteAction(mod, msg) {
                                 }
                             }
                         }
-                    }
-                }
-                break;
-            }
-
-            case "ACT_UPGRADE": {
-                if (root.hubGoals && msg.upgradeId) {
-                    if (!root.hubGoals.tryUnlockUpgrade(msg.upgradeId)) {
-                        // Force apply upgrade if client stored shapes were slightly behind host
-                        const currentLv = root.hubGoals.getUpgradeLevel(msg.upgradeId);
-                        root.hubGoals.upgradeLevels[msg.upgradeId] = currentLv + 1;
-                        root.signals.upgradePurchased.dispatch(msg.upgradeId);
                     }
                 }
                 break;

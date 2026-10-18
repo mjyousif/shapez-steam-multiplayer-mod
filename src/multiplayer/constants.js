@@ -44,7 +44,43 @@ const PLAYER_COLORS = [
     "#14b8a6", // Teal
 ];
 
+/**
+ * Protocol version to ensure network wire compatibility between host and joining peers.
+ * Increment whenever packet format or synchronization semantics change.
+ * @type {number}
+ */
+const PROTOCOL_VERSION = 2;
+
+/**
+ * Periodic interval (in milliseconds) at which the host broadcasts authoritative Hub status.
+ * @type {number}
+ */
+const HUB_SYNC_INTERVAL_MS = 2000;
+
+/**
+ * Periodic interval (in milliseconds) at which the host performs background world drift checks.
+ * @type {number}
+ */
+const WORLD_CHECK_INTERVAL_MS = 3000;
+
+/**
+ * Region tile dimension (16x16 chunk) for spatial hashing and targeted desync repair.
+ * @type {number}
+ */
+const REGION_SIZE = 16;
+
+/**
+ * Maximum duration (in milliseconds) for a client-side predicted upgrade before expiring.
+ * @type {number}
+ */
+const PREDICTION_TIMEOUT_MS = 3000;
+
 module.exports = {
     METADATA,
     PLAYER_COLORS,
+    PROTOCOL_VERSION,
+    HUB_SYNC_INTERVAL_MS,
+    WORLD_CHECK_INTERVAL_MS,
+    REGION_SIZE,
+    PREDICTION_TIMEOUT_MS,
 };

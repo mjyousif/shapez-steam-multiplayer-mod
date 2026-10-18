@@ -58,6 +58,10 @@ describe("Client Savegame Isolation", () => {
                 moveToState: (key, payload) => {
                     enteredState = key;
                     enteredPayload = payload;
+                    mockApp.stateMgr.currentState = { key };
+                    for (const listener of stateEnteredListeners) {
+                        listener({ key });
+                    }
                 },
             },
         };

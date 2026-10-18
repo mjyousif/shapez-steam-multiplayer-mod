@@ -26,8 +26,9 @@ Deep-dives into the mod's architecture, underlying protocols, and game engine ho
   * `shapez.ModInterface` method interception.
   * Delta action catalog (`ACT_PLACE`, `ACT_DELETE`, `ACT_SIGNAL`, etc.).
   * Recursion & echo-loop prevention (`isApplyingRemote`).
-  * Hub goals, upgrades, waypoints, and pinned shape synchronization.
-  * Client savegame isolation and on-demand resync protocol.
+  * Host-authoritative hub goals, optimistic upgrade prediction, and geometric multiplier recalculation.
+  * Background FNV-1a world checksums and targeted spatial region self-healing.
+  * Client savegame isolation and seamless in-game resync reload protocol.
 
 ---
 
@@ -51,7 +52,7 @@ Guides detailing in-game features, Steamworks integration, and development tools
 
 * [**Testing, Tooling & Troubleshooting**](features/testing-and-troubleshooting.md)
   * Single-PC dual-window testing (`npm run launch-client`).
-  * Multi-tiered automated test suite (`npm test`: syntax check, 8 unit test suites, E2E simulation).
+  * Multi-tiered automated test suite (`npm test`: syntax check, 10 unit test suites, E2E simulation).
   * Standalone installer CLI switches (`--backup`, `--silent`, `--uninstall`, etc.).
   * Automated savegame backup utilities (`npm run backup-saves`).
   * Common troubleshooting scenarios (firewalls, port conflicts, safe mode).
@@ -103,7 +104,8 @@ shapez-steam-multiplayer-mod/
 │   │   │   ├── actions.js      # Remote action dispatcher with reentrancy guards
 │   │   │   ├── cursors.js      # Interpolated cursors, ghosts, radar pings
 │   │   │   ├── game_hooks.js   # GameLogic & HUD method interceptors
-│   │   │   ├── hub_sync.js     # Hub goals & upgrades synchronization
+│   │   │   ├── hub_sync.js     # Authoritative hub progression & prediction
+│   │   │   ├── world_check.js  # Spatial region checksums & targeted auto-repair
 │   │   │   └── world_dump.js   # 48 KB sliced world serialization & savegame loader
 │   │   └── ui/                 # User interface elements
 │   │       ├── dialogs.js      # Modals, friends list, overlays & toasts
@@ -119,9 +121,12 @@ shapez-steam-multiplayer-mod/
 │   ├── asar-patcher.test.js    # ASAR pickle header and in-place patching tests
 │   ├── dist-package.test.js    # Release packaging and distribution tests
 │   ├── framing.test.js         # 4-byte BE framing and stream reassembly tests
+│   ├── hub-sync.test.js        # Authoritative hub progression & prediction reconciliation
 │   ├── installer-cli.test.js   # Installer binary CLI smoke tests
 │   ├── join-code.test.js       # Join code encoding/decoding and sanitizer tests
 │   ├── network-resilience.test.js # Buffer resilience, chunking, and port failover tests
-│   └── savegame-isolation.test.js # Savegame isolation and dedicated coop slot tests
+│   ├── savegame-isolation.test.js # Savegame isolation and dedicated coop slot tests
+│   ├── version-check.test.js   # Semver invariants and repository version synchronization
+│   └── world-check.test.js     # Spatial region FNV-1a checksums & self-healing repair
 └── package.json
 ```

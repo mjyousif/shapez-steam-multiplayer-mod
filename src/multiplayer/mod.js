@@ -17,7 +17,13 @@
  *    - CSS injection (`src/multiplayer/ui/styles.js`)
  */
 
-const { METADATA, PLAYER_COLORS } = require("./constants");
+const {
+    METADATA,
+    PLAYER_COLORS,
+    PROTOCOL_VERSION,
+    HUB_SYNC_INTERVAL_MS,
+    WORLD_CHECK_INTERVAL_MS,
+} = require("./constants");
 const { encodeJoinCode, decodeJoinCode } = require("./join_code");
 const { HUDMultiplayer } = require("./hud/hud_multiplayer");
 const { injectStyles } = require("./ui/styles");
@@ -25,6 +31,7 @@ const dialogs = require("./ui/dialogs");
 const actions = require("./sync/actions");
 const hubSync = require("./sync/hub_sync");
 const worldDump = require("./sync/world_dump");
+const worldCheck = require("./sync/world_check");
 const cursors = require("./sync/cursors");
 const gameHooks = require("./sync/game_hooks");
 
@@ -71,6 +78,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.isInsidePlaceBuilding = false;
         this.pendingActionsQueue = [];
         this.lastHubSyncTime = 0;
+        this.lastWorldCheckTime = 0;
         this.activeCoopSavegame = null;
         this.clientWorldLoaded = false;
         this.assignedPlayerId = "";
@@ -84,6 +92,24 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.modalEl = null;
         this.updateInfo = null;
         this.bridgeAvailable = null;
+
+        // Hub and world synchronization state
+        this.hubSeq = 0;
+        this.lastHubSeq = 0;
+        this.pendingUpgrades = new Map();
+        this.nextReqId = 0;
+        this.ackReq = {};
+
+        this.actionSeq = 0;
+        this.lastAppliedActionSeq = 0;
+        this.worldDumpActionSeq = 0;
+        this.lastLocalActionAt = 0;
+        this.checkMismatchCount = 0;
+        this.repairRounds = 0;
+
+        // In-game world reload / resync state
+        this.isReloadingWorld = false;
+        this.pendingWorldEntry = null;
 
         this.injectStyles();
         this.setupIpcListeners();
@@ -119,6 +145,15 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (this.signals && this.signals.stateEntered) {
             this.signals.stateEntered.add(state => {
                 if (state && state.key === "MainMenuState") {
+                    if (this.isReloadingWorld) {
+                        this.isReloadingWorld = false;
+                        if (typeof this.pendingWorldEntry === "function") {
+                            const entry = this.pendingWorldEntry;
+                            this.pendingWorldEntry = null;
+                            entry();
+                        }
+                        return;
+                    }
                     if (this.isSessionActive() && !this.isConnecting) {
                         this.logInfo("Returned to Main Menu from active game - terminating background multiplayer session.");
                         this.stopSession(false);
@@ -586,6 +621,7 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 playerId: local.id,
                 name: local.name,
                 version: METADATA.version,
+                protocolVersion: PROTOCOL_VERSION,
             });
         };
         sendHello();
@@ -747,8 +783,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     dispatchNetworkAction(actionMsg) {
         if (!this.isSessionActive()) return;
         if (this.role === "host") {
+            this.actionSeq = (this.actionSeq || 0) + 1;
+            actionMsg.actionSeq = this.actionSeq;
             this.broadcastFromHost(actionMsg);
         } else if (this.role === "client") {
+            this.lastLocalActionAt = Date.now();
             this.sendToHost(actionMsg);
         }
     }
@@ -783,6 +822,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
         switch (msg.type) {
             case "HELLO": {
+                if (msg.protocolVersion !== PROTOCOL_VERSION) {
+                    this.sendRawToPeer(peer, {
+                        type: "REJECT",
+                        reason: `Incompatible protocol version. Host is running Protocol v${PROTOCOL_VERSION}. Please update your mod!`,
+                    });
+                    break;
+                }
                 const now = performance.now();
                 if (peer.ready && peer.lastWelcomeSentAt && now - peer.lastWelcomeSentAt < 8000) {
                     break;
@@ -851,6 +897,18 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 this.sendWorldWelcomeToPeer(peer);
                 break;
             }
+            case "REQUEST_UPGRADE": {
+                hubSync.handleUpgradeRequest(this, peerId, msg);
+                break;
+            }
+            case "REQUEST_REGION_HASHES": {
+                worldCheck.handleHostRequestRegionHashes(this, peer);
+                break;
+            }
+            case "REQUEST_REGIONS": {
+                worldCheck.handleHostRequestRegions(this, peer, msg);
+                break;
+            }
             case "CURSOR": {
                 msg.playerId = peer.playerId || peerId;
                 msg.name = peer.name;
@@ -889,9 +947,10 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             case "ACT_SIGNAL":
             case "ACT_LEVER":
             case "ACT_CLEAR_BELTS":
-            case "ACT_UPGRADE":
             case "ACT_WAYPOINTS":
             case "ACT_PINS": {
+                this.actionSeq = (this.actionSeq || 0) + 1;
+                msg.actionSeq = this.actionSeq;
                 this.applyRemoteAction(msg);
                 this.broadcastFromHost(msg, peerId);
                 break;
@@ -927,6 +986,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 }
                 this.logInfo(`Received WELCOME_WORLD from Host (${msg.hostName || msg.hostId})`);
                 this.updateJoinProgressModal("Loading factory world & warming up simulation...", 100);
+                if (typeof msg.actionSeq === "number") {
+                    this.worldDumpActionSeq = msg.actionSeq;
+                    this.lastAppliedActionSeq = Math.max(this.lastAppliedActionSeq || 0, msg.actionSeq);
+                }
+                if (typeof msg.hubSeq === "number") {
+                    this.lastHubSeq = msg.hubSeq;
+                }
                 if (msg.assignedPlayerId) {
                     this.assignedPlayerId = msg.assignedPlayerId;
                 }
@@ -939,6 +1005,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     this.applyRosterUpdate(msg.roster);
                 }
                 this.loadHostWorldDump(msg.dump, msg.hostName);
+                break;
+            }
+            case "REJECT": {
+                this.closeJoinProgressModal();
+                this.isConnecting = false;
+                this.showToast(msg.reason || "Connection rejected by host.");
+                this.stopSession(false);
                 break;
             }
             case "ROSTER_UPDATE": {
@@ -965,12 +1038,23 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 this.applyHubSync(msg);
                 break;
             }
+            case "SYNC_CHECK": {
+                worldCheck.handleClientSyncCheck(this, msg);
+                break;
+            }
+            case "REGION_HASHES": {
+                worldCheck.handleClientRegionHashes(this, msg);
+                break;
+            }
+            case "REGION_DATA": {
+                worldCheck.handleClientRegionData(this, msg);
+                break;
+            }
             case "ACT_PLACE":
             case "ACT_DELETE":
             case "ACT_SIGNAL":
             case "ACT_LEVER":
             case "ACT_CLEAR_BELTS":
-            case "ACT_UPGRADE":
             case "ACT_WAYPOINTS":
             case "ACT_PINS": {
                 this.applyRemoteAction(msg);
@@ -1036,14 +1120,21 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
 
     attachGameRoot(root, hudPart) {
         this.isConnecting = false;
+        this.isReloadingWorld = false;
         this.closeJoinProgressModal();
         this.currentRoot = root;
         this.currentHud = hudPart;
+
+        this.checkMismatchCount = 0;
+        this.repairRounds = 0;
 
         if (this.pendingActionsQueue.length > 0) {
             const queue = this.pendingActionsQueue.slice();
             this.pendingActionsQueue = [];
             for (const act of queue) {
+                if (typeof act.actionSeq === "number" && act.actionSeq <= (this.worldDumpActionSeq || 0)) {
+                    continue;
+                }
                 this.applyRemoteAction(act);
             }
         }
@@ -1086,9 +1177,23 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     }
 
     onInGameTick(root, now) {
-        if (this.role === "host" && now - this.lastHubSyncTime >= 2000) {
-            this.lastHubSyncTime = now;
-            this.broadcastHubSync(root);
+        if (this.role === "host") {
+            if (now - this.lastHubSyncTime >= HUB_SYNC_INTERVAL_MS) {
+                this.lastHubSyncTime = now;
+                this.broadcastHubSync(root);
+            }
+            if (now - this.lastWorldCheckTime >= WORLD_CHECK_INTERVAL_MS) {
+                this.lastWorldCheckTime = now;
+                const regHashes = worldCheck.computeRegionHashes(root);
+                const rootHash = worldCheck.computeRootHash(regHashes);
+                this.broadcastFromHost({
+                    type: "SYNC_CHECK",
+                    actionSeq: this.actionSeq || 0,
+                    rootHash,
+                });
+            }
+        } else if (this.role === "client") {
+            hubSync.checkExpiredPredictions(this, Date.now());
         }
     }
 
