@@ -5,6 +5,7 @@ node_modules/
 dist/
 bin/
 obj/
+*.node
 
 # Temporary and backup files
 *.tmp

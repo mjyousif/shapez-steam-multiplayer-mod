@@ -33,7 +33,7 @@ Whenever you modify any subsystem in this repository, you **MUST** audit and upd
   * Manages Steam lobby state, metadata windowing, and IPC dispatch to Renderer.
 
 ### 2.2 Networking Invariants
-* **Primary Transport**: Native Steamworks P2P (`ISteamNetworking`) via `src/steam_p2p_win64.node`.
+* **Primary Transport**: Native Steamworks P2P (`ISteamNetworking`) via `bin/steam_p2p_win64.node`.
   * Channel 0: Reliable ordered (`k_EP2PSendReliable = 2`) for world dumps, gameplay actions, and hub sync.
   * Channel 1: Unreliable low-latency (`k_EP2PSendUnreliable = 0`) for rapid cursor streaming.
 * **Secondary Transport**: Length-prefixed TCP sockets with 4-byte Big-Endian length headers.
@@ -76,11 +76,12 @@ The automated pipeline executes three distinct stages:
 
 ## 4. Building Native Addons & Installer
 
-* **Native P2P Addon (`src/steam_p2p_win64.node`)**:
+* **Native P2P Addon (`bin/steam_p2p_win64.node`)**:
   * Generated programmatically by [`scripts/build-native-p2p.js`](scripts/build-native-p2p.js) without external MSBuild/Visual Studio dependencies.
-  * If updating P2P exports or SteamNetworking bindings, rebuild using:
+  * Ignored by Git (`*.node`) and generated automatically on demand by `pretest`, `prepackage`, and installer scripts if not present on disk.
+  * Can be explicitly compiled using:
     ```powershell
-    node scripts/build-native-p2p.js
+    npm run build:native
     ```
 * **C# Windows Installer (`src/installer/Program.cs`)**:
   * Compiled via `scripts/build-dist.js` using `csc.exe` (.NET Framework 4.8).

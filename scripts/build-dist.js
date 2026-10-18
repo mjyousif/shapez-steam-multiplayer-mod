@@ -7,7 +7,8 @@ const DIST_DIR = path.join(ROOT_DIR, "dist");
 const SRC_DIR = path.join(ROOT_DIR, "src");
 const BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
 const MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
-const P2P_NODE_FILE = path.join(SRC_DIR, "steam_p2p_win64.node");
+const BIN_DIR = path.join(ROOT_DIR, "bin");
+const P2P_NODE_FILE = path.join(BIN_DIR, "steam_p2p_win64.node");
 
 function findCsc() {
     const candidates = [

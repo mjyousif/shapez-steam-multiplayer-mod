@@ -125,7 +125,7 @@ Rather than unpacking files, the installer:
    };
    ```
 4. Recalculates 4-byte Pickle alignment padding and writes the updated header prefix followed by the original payload and appended patches.
-5. Deploys the native P2P module `src/steam_p2p_win64.node` into `<GameDir>/resources/app.asar.unpacked/` so that Electron Main can load `ISteamNetworking` bindings directly.
+5. Deploys the native P2P module `bin/steam_p2p_win64.node` (generated on demand by `scripts/build-native-p2p.js`) into `<GameDir>/resources/app.asar.unpacked/` so that Electron Main can load `ISteamNetworking` bindings directly.
 6. All untouched files (including `bundle.js` and `shapez.io-private-artifacts`) retain their original relative offsets and native unpack pointers.
 
 ---

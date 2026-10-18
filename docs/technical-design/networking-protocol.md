@@ -99,7 +99,7 @@ When hosting, if port `27080` is in use (`EADDRINUSE`), the TCP server automatic
 
 ### 2.2 Native Steamworks P2P (`ISteamNetworking`) & Lobby Signaling
 
-When connecting via Steam, players are frequently behind carrier-grade NATs (CGNAT) or restrictive corporate/home routers where inbound TCP ports cannot be opened. The mod resolves this using Valve's official **`ISteamNetworking`** API, implemented via a custom PE64 native Node addon (`src/steam_p2p_win64.node`).
+When connecting via Steam, players are frequently behind carrier-grade NATs (CGNAT) or restrictive corporate/home routers where inbound TCP ports cannot be opened. The mod resolves this using Valve's official **`ISteamNetworking`** API, implemented via a custom PE64 native Node addon (`bin/steam_p2p_win64.node`).
 
 #### Native PE64 Addon Architecture (`scripts/build-native-p2p.js`)
 To avoid requiring full Visual Studio C++ toolchains on end-user machines, the native Node addon is synthesized directly as a 64-bit Windows PE DLL with N-API export tables:
