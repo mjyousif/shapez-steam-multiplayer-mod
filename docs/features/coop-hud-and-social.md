@@ -8,7 +8,7 @@ Building massive factories in Co-op requires constant coordination and communica
 
 ## 2. In-Game HUD Panel
 
-The Co-op HUD is embedded at the top-center of the screen during gameplay (`HUDMultiplayer` in `src/steam_multiplayer.js`).
+The Co-op HUD is embedded at the top-center of the screen during gameplay (`HUDMultiplayer` in `src/multiplayer/hud/hud_multiplayer.js`).
 
 ### HUD Components & Layout
 * **Draggable Header Bar**: Players can click and drag the HUD header anywhere on the screen to avoid obscuring Hub deliveries, pinned goals, or hotbar selections.

@@ -155,7 +155,7 @@ async function verifyMainProcessAndModEndToEnd() {
     assert.strictEqual(friends[0].name, "CoopBuddy");
     console.log("   [PASS] Steam Profile, Friends, and Lobby IPC handlers verified.");
 
-    // Build mock shapez environment to load src/steam_multiplayer.js for both Host and Client
+    // Build mock shapez environment to load dist/steam_multiplayer.js for both Host and Client
     function createMockShapezWorld(env, label) {
         const placedBuildings = [];
         const deletedBuildings = [];

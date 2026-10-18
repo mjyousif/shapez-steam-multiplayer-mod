@@ -39,7 +39,7 @@ flowchart TD
 
 ---
 
-## 2. Game Engine Interception (`src/steam_multiplayer.js`)
+## 2. Game Engine Interception (`src/multiplayer/sync/game_hooks.js`)
 
 The mod hooks into core game subsystems during initialization (`setupGameHooks()`) using the official `shapez.ModInterface` extension API.
 

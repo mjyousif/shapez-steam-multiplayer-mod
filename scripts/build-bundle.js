@@ -3,8 +3,8 @@
  * @description Zero-dependency bundler and module linker for shapez.io Steam Co-op Mod.
  * 
  * Aggregates modular units from:
- *   - `src/bridge/*.js`      -> `src/steam_bridge.js` (Main Process distribution bundle)
- *   - `src/multiplayer/*.js` -> `src/steam_multiplayer.js` (Renderer Sandbox distribution bundle)
+ *   - `src/bridge/*.js`      -> `dist/steam_bridge.js` (Main Process distribution bundle)
+ *   - `src/multiplayer/*.js` -> `dist/steam_multiplayer.js` (Renderer Sandbox distribution bundle)
  * 
  * Uses micro-closures to encapsulate module scopes cleanly, preventing variable collisions
  * while preserving JSDoc comments, type definitions, and architectural invariants.
@@ -105,10 +105,10 @@ function __createScopedRequire(fromFile) {
 }
 
 /**
- * Builds the Electron Main Process Bridge bundle (`src/steam_bridge.js`).
+ * Builds the Electron Main Process Bridge bundle (`dist/steam_bridge.js`).
  */
 function buildBridgeBundle() {
-    console.log("-> Assembling src/steam_bridge.js from src/bridge/ modules...");
+    console.log("-> Assembling dist/steam_bridge.js from src/bridge/ modules...");
 
     const bridgeModules = discoverModules(BRIDGE_DIR);
     console.log(`   Found ${bridgeModules.length} module(s) in src/bridge/`);
@@ -127,7 +127,7 @@ ${code}
     }
 
     const bundleContent = `/**
- * @file src/steam_bridge.js
+ * @file dist/steam_bridge.js
  * @description shapez.io Steam Co-op Mod - Electron Main Process Bridge
  * 
  * NOTE: This is the compiled self-contained bundle dynamically assembled from modular units in src/bridge/.
@@ -153,10 +153,10 @@ module.exports = __bridge;
 }
 
 /**
- * Builds the Chromium Renderer mod bundle (`src/steam_multiplayer.js`).
+ * Builds the Chromium Renderer mod bundle (`dist/steam_multiplayer.js`).
  */
 function buildMultiplayerBundle() {
-    console.log("-> Assembling src/steam_multiplayer.js from src/multiplayer/ modules...");
+    console.log("-> Assembling dist/steam_multiplayer.js from src/multiplayer/ modules...");
 
     const modModules = discoverModules(MULTIPLAYER_DIR);
     console.log(`   Found ${modModules.length} module(s) in src/multiplayer/`);
@@ -176,7 +176,7 @@ ${code}
 
     const bundleContent = `/* eslint-disable */
 /**
- * @file src/steam_multiplayer.js
+ * @file dist/steam_multiplayer.js
  * @description shapez.io Steam Co-op Multiplayer Mod (Chromium Renderer Sandbox Bundle)
  * 
  * NOTE: This is the compiled self-contained bundle dynamically assembled from modular units in src/multiplayer/.
