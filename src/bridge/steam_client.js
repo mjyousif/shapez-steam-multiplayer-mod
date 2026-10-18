@@ -15,6 +15,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const crypto = require("crypto");
 const { logInfo, logWarn, writeMpLog } = require("./logger");
 const { loadNativeSteamP2P, ensureP2PSessionAccepted, startP2PPollTimer, setP2pInitialized } = require("./native_p2p");
 
@@ -135,7 +136,7 @@ function getLocalSteamProfile() {
     }
 
     if (!fallbackProfile) {
-        const suffix = Math.floor(1000 + Math.random() * 9000);
+        const suffix = crypto.randomInt(1000, 10000);
         fallbackProfile = {
             steamId: "local_" + process.pid + "_" + suffix,
             name: (os.userInfo().username || "Player") + "#" + suffix,
