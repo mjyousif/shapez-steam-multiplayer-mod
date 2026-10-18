@@ -61,7 +61,7 @@ npm run install-mod
 1. Backs up your original `app.asar` to `C:\Program Files (x86)\Steam\steamapps\common\shapez.io\resources\app.asar.vanilla.bak` (if not already backed up).
 2. Updates `index.js`, `steam.js`, and `preload.js` inside `app.asar` to enable Steamworks Lobby/Friends IPC and TCP P2P networking.
 3. Copies `src/steam_multiplayer.js` into `%APPDATA%\shapez.io\mods\steam_multiplayer.js`.
-4. Deploys `src/steam_p2p_win64.node` into `<GameDir>\resources\app.asar.unpacked\` for native Steamworks P2P support.
+4. Deploys `bin/steam_p2p_win64.node` into `<GameDir>\resources\app.asar.unpacked\` for native Steamworks P2P support.
 
 ### Save Game Safety & Backups
 Your singleplayer save games (`%APPDATA%\shapez.io\saves`) are **100% safe**: neither installing nor uninstalling the mod alters or deletes them.
@@ -175,6 +175,8 @@ Full architectural and feature design documentation is available in the [`docs/`
 │   ├── launch-coop-client.js   # Spawns a second local game instance (--multi-instance)
 │   ├── uninstall-mod.js        # Restores vanilla app.asar and removes mod
 │   └── verify-mod.js           # Automated verification & Host<->Client test suite
+├── bin/
+│   └── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon (generated)
 ├── src/
 │   ├── bridge/                 # Main Process modular units (Node.js runtime)
 │   │   ├── index.js            # Central bridge orchestrator
@@ -192,10 +194,7 @@ Full architectural and feature design documentation is available in the [`docs/`
 │   │   ├── hud/                # HUD components (hud_multiplayer.js)
 │   │   ├── sync/               # Synchronization (actions, cursors, hooks, hub, world)
 │   │   └── ui/                 # UI components (dialogs.js, styles.js)
-│   ├── installer/              # Standalone C# Windows installer GUI (Program.cs)
-│   ├── steam_bridge.js         # Compiled Electron Main Process distribution bundle
-│   ├── steam_multiplayer.js    # Compiled Chromium Renderer Process distribution bundle
-│   └── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon
+│   └── installer/              # Standalone C# Windows installer GUI (Program.cs)
 └── tests/                      # Automated unit test suite (node --test)
     ├── asar-patcher.test.js    # ASAR header parsing and patching tests
     ├── dist-package.test.js    # Package distribution bundle tests

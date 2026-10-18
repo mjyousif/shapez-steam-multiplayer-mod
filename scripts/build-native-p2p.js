@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 /**
- * Generates src/steam_p2p_win64.node — a compact, zero-dependency Windows x64 N-API native addon
+ * Generates bin/steam_p2p_win64.node — a compact, zero-dependency Windows x64 N-API native addon
  * that dynamically resolves N-API from the host process (shapezio.exe / node.exe) and
  * ISteamNetworking / ISteamFriends / ISteamMatchmaking functions from steam_api64.dll.
  *
@@ -919,6 +919,10 @@ writeSection(1, ".rdata\0\0", rdataCursor, RVA_RDATA, SIZE_RDATA, OFF_RDATA, 0x4
 writeSection(2, ".data\0\0\0", SIZE_DATA, RVA_DATA, SIZE_DATA, OFF_DATA, 0xc0000040);
 writeSection(3, ".reloc\0\0", 8, RVA_RELOC, SIZE_RELOC, OFF_RELOC, 0x42000040);
 
-const outPath = path.resolve(__dirname, "..", "src", "steam_p2p_win64.node");
+const outDir = path.resolve(__dirname, "..", "bin");
+if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+}
+const outPath = path.join(outDir, "steam_p2p_win64.node");
 fs.writeFileSync(outPath, buf);
 console.log(`Built ${outPath} (${buf.length} bytes, .text=${textBytes.length} bytes)`);

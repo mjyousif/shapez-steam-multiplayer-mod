@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The mod integrates directly with Valve's **Steamworks SDK** via **Greenworks** and a custom native PE64 **`ISteamNetworking`** Node addon (`src/steam_p2p_win64.node`), providing native Steam multiplayer features without requiring external accounts, servers, or registration.
+The mod integrates directly with Valve's **Steamworks SDK** via **Greenworks** and a custom native PE64 **`ISteamNetworking`** Node addon (`bin/steam_p2p_win64.node`), providing native Steam multiplayer features without requiring external accounts, servers, or registration.
 
 All Steam operations are bridged through the Electron Main Process (`src/steam_bridge.js`) and rendered dynamically inside the game menu and in-game HUD (`src/steam_multiplayer.js`).
 
