@@ -5,33 +5,39 @@
 The Co-op Multiplayer Mod features a **dual-transport networking engine** designed to provide instant connections regardless of network environment:
 
 1. **Direct TCP Sockets (Main Process)**: Lowest latency; ideal for LAN, port-forwarded IP addresses, local multi-instance testing (`127.0.0.1:27080`), and virtual private networks (Tailscale, Hamachi, ZeroTier).
-2. **WebRTC DataChannels (Renderer Process)**: Peer-to-peer UDP channels with NAT traversal; connects Steam friends across different networks without requiring port-forwarding or third-party relay servers.
+2. **Native Steamworks P2P (Main Process)**: High-performance peer-to-peer networking over Valve's Steam Datagram network via the native `ISteamNetworking` API (`steam_p2p_win64.node`). Connects Steam friends across restrictive NATs and firewalls without requiring port-forwarding, third-party relay servers, or friends chat spam.
 
 ```mermaid
 flowchart LR
     subgraph Host["Host Player"]
         HTCP["TCP Framing Server (:27080)"]
-        HMod["Mod Core"]
-        HWebRTC["WebRTC RTCPeerConnection"]
-        HSteam["Steamworks Friends API"]
-        HMod <--> HTCP
-        HMod <--> HWebRTC
-        HMod <--> HSteam
+        HBridge["Electron Main Bridge (steam_bridge.js)"]
+        HNativeP2P["Native Steam P2P Addon (ISteamNetworking)"]
+        HLobby["Steamworks Lobby API"]
+        HMod["Mod Core (Renderer)"]
+
+        HMod <-->|IPC| HBridge
+        HBridge <--> HTCP
+        HBridge <--> HNativeP2P
+        HBridge <--> HLobby
     end
 
     subgraph Client["Joining Client"]
         CTCP["TCP Client Socket"]
-        CMod["Mod Core"]
-        CWebRTC["WebRTC RTCPeerConnection"]
-        CSteam["Steamworks Friends API"]
-        CMod <--> CTCP
-        CMod <--> CWebRTC
-        CMod <--> CSteam
+        CBridge["Electron Main Bridge (steam_bridge.js)"]
+        CNativeP2P["Native Steam P2P Addon (ISteamNetworking)"]
+        CLobby["Steamworks Lobby API"]
+        CMod["Mod Core (Renderer)"]
+
+        CMod <-->|IPC| CBridge
+        CBridge <--> CTCP
+        CBridge <--> CNativeP2P
+        CBridge <--> CLobby
     end
 
     HTCP <==> |"Length-Prefixed TCP (Direct IP / LAN / VPN)"| CTCP
-    HSteam <==> |"Out-of-Band Signaling: [SHAPEZ_MP]:{kind: ...}"| CSteam
-    HWebRTC <==> |"P2P UDP DataChannel (STUN NAT Traversal)"| CWebRTC
+    HLobby <==> |"Session Discovery & Signaling (Lobby Metadata)"| CLobby
+    HNativeP2P <==> |"ISteamNetworking P2P (Valve Steam Datagram Relay)"| CNativeP2P
 ```
 
 ---
@@ -86,50 +92,45 @@ function attachFrameParser(socket, onMessage) {
 }
 ```
 
+#### Port Conflict Handling
+When hosting, if port `27080` is in use (`EADDRINUSE`), the TCP server automatically increments the port (e.g. `27081`, `27082`) and retries up to 10 times, registering the active endpoint with the Steam Lobby metadata and Rich Presence.
+
 ---
 
-### 2.2 WebRTC Peer-to-Peer over Steam Friends Signaling
+### 2.2 Native Steamworks P2P (`ISteamNetworking`) & Lobby Signaling
 
-When connecting via Steam Friends, users may be behind restrictive NAT routers or firewalls where opening inbound ports is impossible. The mod solves this using standard **WebRTC DataChannels** with **Steam Friends Chat** acting as the out-of-band signaling conduit.
+When connecting via Steam, players are frequently behind carrier-grade NATs (CGNAT) or restrictive corporate/home routers where inbound TCP ports cannot be opened. The mod resolves this using Valve's official **`ISteamNetworking`** API, implemented via a custom PE64 native Node addon (`src/steam_p2p_win64.node`).
 
-#### The Signaling Channel
-Greenworks exposes Steam's friend messaging subsystem:
-* `greenworks.setListenForFriendsMessage(true)` enables chat message interception.
-* `greenworks.sendFriendMessage(friendSteamId, message)` transmits out-of-band payloads.
-* Signaling messages are tagged with the signature prefix: `[SHAPEZ_MP]:` followed by JSON.
+#### Native PE64 Addon Architecture (`scripts/build-native-p2p.js`)
+To avoid requiring full Visual Studio C++ toolchains on end-user machines, the native Node addon is synthesized directly as a 64-bit Windows PE DLL with N-API export tables:
+* Dynamically resolves `steam_api64.dll` exports inside the running game process (`GetProcAddress`).
+* Interfaces directly with `SteamNetworking()` pointer tables:
+  * `SendP2PPacket(CSteamID, const void *pubData, uint32 cubData, EP2PSend eP2PSendType, int nChannel)`
+  * `ReadP2PPacket(void *pubDest, uint32 cubDest, uint32 *pcubMsgSize, CSteamID *psteamIDRemote, int nChannel)`
+  * `AcceptP2PSessionWithUser(CSteamID steamIDRemote)`
+  * `CloseP2PSessionWithUser(CSteamID steamIDRemote)`
+* Exports JS methods to Electron Main: `init()`, `sendP2PPacket()`, `readP2PPacket()`, `acceptP2PSession()`, `closeP2PSession()`, `requestFriendRichPresence()`, `requestLobbyData()`.
 
-#### The WebRTC Handshake Lifecycle
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as Client Player
-    actor Host as Host Player
+#### Dual Channel Architecture
+The native P2P transport allocates two dedicated channels:
+* **Channel 0 — Reliable Ordered (`k_EP2PSendReliable = 2`)**: Used for gameplay actions (`ACT_PLACE`, `ACT_DELETE`), world dumps (`WELCOME_WORLD`, `CHUNK_PART`), and hub state sync (`SYNC_HUB`). Retransmits dropped packets automatically and supports payloads up to 1 MB.
+* **Channel 1 — Unreliable Low-Latency (`k_EP2PSendUnreliable = 0`)**: Used for remote cursor streaming (`CURSOR`). Dropped packets are ignored in favor of newer updates, avoiding head-of-line blocking.
 
-    Client->>Host: Steam Friend Msg: [SHAPEZ_MP]: {"kind":"WEBRTC_OFFER", "sdp":{...}}
-    Host->>Host: createRtcPeerConnection(remoteSteamId, isHost=true)
-    Host->>Host: pc.setRemoteDescription(offer)
-    Host->>Host: answer = pc.createAnswer()
-    Host->>Client: Steam Friend Msg: [SHAPEZ_MP]: {"kind":"WEBRTC_ANSWER", "sdp":{...}}
-    Client->>Client: pc.setRemoteDescription(answer)
+Incoming packets on both channels are drained every 15ms via an unref'd timer (`drainP2PChannel(0)`, `drainP2PChannel(1)`).
 
-    par ICE Candidate Exchange
-        Client->>Host: Steam Friend Msg: [SHAPEZ_MP]: {"kind":"WEBRTC_ICE", "candidate":{...}}
-        Host->>Client: Steam Friend Msg: [SHAPEZ_MP]: {"kind":"WEBRTC_ICE", "candidate":{...}}
-    end
+#### Zero Friends Chat Spam
+Unlike older implementations that relied on user chat messages (`[SHAPEZ_MP]:...`), the modern engine produces **zero Steam Friends Chat spam**:
+* **Session Discovery**: Handled exclusively via official Steam Matchmaking Lobbies (`createSteamLobbyInternal`, `requestLobbyData`) and Steam Rich Presence keys (`shapez_mp_lobby`, `shapez_mp_endpoint`, `shapez_mp_mode`).
+* **Session Handshake**: Once a client joins the host's Steam Lobby, peer-to-peer data packets are transmitted directly over Valve's encrypted Steam Datagram Relay.
 
-    Note over Client,Host: Direct P2P RTCDataChannel Established ("shapez-sync")
-    Host->>Client: WELCOME_WORLD (Chunked Initial Sync)
-```
-
-Public STUN servers are configured to discover external IP candidates:
-* `stun:stun.l.google.com:19302`
-* `stun:stun1.l.google.com:19302`
+#### Fallback Metadata Transport (Test & Mock Environments)
+If native P2P is unavailable (such as in headless CI environments without `steam_api64.dll`), `steam_bridge.js` includes a windowed, zlib-compressed fallback channel over Steam Lobby Data (`encodeLobbyWindow`, `decodeLobbyWindow`), ensuring connectivity in unit-test harnesses.
 
 ---
 
 ## 3. Chunked World Transfer Protocol
 
-A shapez.io factory savegame dump can range from 200 KB to over 10 MB depending on factory complexity. Transmitting large monolithic strings in a single message can saturate network buffers or exceed WebRTC channel buffer limits (typically 64 KB per message).
+A shapez.io factory savegame dump can range from 200 KB to over 10 MB depending on factory complexity. Transmitting large monolithic strings in a single message can saturate network buffers.
 
 To ensure smooth delivery without frame drops, `sendChunkedToPeer()` splits the payload into **48 KB slices**:
 

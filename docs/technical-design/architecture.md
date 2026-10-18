@@ -9,16 +9,19 @@ The Co-op Multiplayer Mod implements a hybrid architecture that splits responsib
 ```mermaid
 flowchart TB
     subgraph HostSystem["Host Operating System / Steam Runtime"]
-        SteamClient["Steam Client API (Steamworks SDK)"]
-        OSNetwork["OS Network Stack (TCP / UDP)"]
+        SteamClient["Steam Client & API (Steamworks SDK / steam_api64.dll)"]
+        OSNetwork["OS Network Stack (TCP Sockets :27080)"]
     end
 
     subgraph ElectronMain["Electron Main Process (Node.js Environment)"]
         IndexJS["index.js (Lifecycle, Mod Loader, Window Manager)"]
-        SteamJS["steam.js (Greenworks Wrapper, TCP Server, P2P Sockets)"]
+        SteamJS["steam.js / steam_bridge.js (IPC Bridge, TCP Framing Server)"]
         Greenworks["Greenworks C++ Addon (.node)"]
+        SteamP2P["Native Steam P2P Addon (steam_p2p_win64.node)"]
+
         IndexJS <--> SteamJS
         SteamJS <--> Greenworks
+        SteamJS <--> SteamP2P
     end
 
     subgraph Preload["Preload Context Bridge"]
@@ -27,15 +30,14 @@ flowchart TB
 
     subgraph RendererProcess["Renderer Process (Chromium Web Environment)"]
         GameEngine["shapez.io Game Engine (bundle.js)"]
-        MultiplayerMod["steam_multiplayer.js (Mod, HUD, Sync Engine)"]
-        WebRTC["Chromium WebRTC Engine (RTCPeerConnection)"]
+        MultiplayerMod["steam_multiplayer.js (Mod, Draggable HUD, Sync Engine)"]
+
         MultiplayerMod <--> GameEngine
-        MultiplayerMod <--> WebRTC
     end
 
     Greenworks <--> |Native C++ Calls| SteamClient
+    SteamP2P <--> |ISteamNetworking Calls| SteamClient
     SteamJS <--> |Node net.Socket| OSNetwork
-    WebRTC <--> |P2P UDP DataChannel| OSNetwork
 
     SteamJS <--> |ipcMain.handle / webContents.send| PreloadJS
     PreloadJS <--> |window.ipcRenderer| MultiplayerMod
@@ -48,8 +50,9 @@ flowchart TB
 ### 2.1 Electron Main Process (`src/steam_bridge.js` & patched `index.js`)
 * **Environment**: Full Node.js runtime with access to native OS libraries, the filesystem, and C++ native Node addons (`.node`).
 * **Responsibilities**:
-  * **Steamworks Bridge**: Initializes and interfaces with Greenworks (`shapez.io-private-artifacts/steam/greenworks`). Exposes Steam Lobby management, Steam Friends presence, Steam Overlay triggers, and Rich Presence to the renderer via Electron IPC.
-  * **TCP Socket Framing Server**: Hosts a `net.Server` socket on port `27080` (or dynamic port) to allow low-latency direct connections over LAN, VPNs (Tailscale, Hamachi, ZeroTier), or localhost.
+  * **Steamworks Matchmaking & Profile Bridge**: Initializes and interfaces with Greenworks (`shapez.io-private-artifacts/steam/greenworks`). Exposes Steam Lobby management, Steam Friends presence, Steam Overlay triggers, and Rich Presence to the renderer via Electron IPC.
+  * **Native Steamworks P2P Engine**: Loads `steam_p2p_win64.node` to bind directly to Valve's `ISteamNetworking` subsystem. Manages Channel 0 (reliable actions/state) and Channel 1 (unreliable high-frequency cursors) with a 15ms drain poll.
+  * **TCP Socket Framing Server**: Hosts a `net.Server` socket on port `27080` (with dynamic port auto-increment on conflicts) to allow low-latency direct connections over LAN, VPNs (Tailscale, Hamachi, ZeroTier), or localhost.
   * **Multi-Instance Isolation**: Inspects command-line switches (`--multi-instance`, `--instance-id`) and relocates Electron's `userData` and save game directories so multiple game clients can run concurrently on one machine without database collisions.
   * **Steam Lifecycle Unlocking**: Overrides the vanilla restriction where `steam.listen()` was skipped if any mod was loaded.
 
@@ -72,12 +75,12 @@ flowchart TB
   * Prevents listener memory leaks when reloading states.
 
 ### 2.3 Renderer Process (`src/steam_multiplayer.js`)
-* **Environment**: Chromium Web Engine (`shapez.GameRoot`, Canvas, WebRTC).
+* **Environment**: Chromium Web Engine (`shapez.GameRoot`, Canvas UI).
 * **Responsibilities**:
-  * Extends `shapez.Mod` and injects `HUDMultiplayer extends shapez.BaseHUDPart`.
+  * Extends `shapez.Mod` and injects `HUDMultiplayer extends shapez.BaseHUDPart` (draggable roster, action buttons, smooth scrolling, team chat).
   * Intercepts game mutations via `shapez.ModInterface` (`tryPlaceBuilding`, `tryDeleteBuilding`, `clearBelts`, `tryUnlockUpgrade`, etc.).
-  * Manages WebRTC `RTCPeerConnection` and `RTCDataChannel` peers.
-  * Performs serialization, packet reassembly, delta action dispatch, remote cursor drawing, and ghost building preview overlays.
+  * Dispatches and receives network packets through the IPC bridge (`window.ipcRenderer`).
+  * Performs delta action dispatch, chunked initial world transfer reassembly, remote cursor interpolation, ghost building preview overlays, and off-screen directional arrows.
 
 ---
 
@@ -122,7 +125,8 @@ Rather than unpacking files, the installer:
    };
    ```
 4. Recalculates 4-byte Pickle alignment padding and writes the updated header prefix followed by the original payload and appended patches.
-5. All untouched files (including `bundle.js` and `shapez.io-private-artifacts`) retain their original relative offsets and native unpack pointers.
+5. Deploys the native P2P module `src/steam_p2p_win64.node` into `<GameDir>/resources/app.asar.unpacked/` so that Electron Main can load `ISteamNetworking` bindings directly.
+6. All untouched files (including `bundle.js` and `shapez.io-private-artifacts`) retain their original relative offsets and native unpack pointers.
 
 ---
 
@@ -150,5 +154,5 @@ steam.listen(); // <-- Always executed, keeping Steam active
 ```
 
 Additionally, `steam.js` detects whether Greenworks successfully initialized:
-* **Steam Available**: Initializes Greenworks, registers Steam lobby listeners, enables friends signaling, and monitors overlay events.
+* **Steam Available**: Initializes Greenworks, binds `steam_p2p_win64.node`, registers Steam lobby listeners, and monitors overlay events.
 * **Steam Unavailable (Offline / Dev Fallback)**: Automatically falls back to local virtual profiles (`local_<PID>_<suffix>`), allowing multiplayer testing over direct TCP even when running offline or without the Steam client active.

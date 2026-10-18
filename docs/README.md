@@ -1,6 +1,6 @@
 # shapez.io Co-op Multiplayer Mod — Documentation Hub
 
-Welcome to the technical design and feature documentation for the **shapez.io Steam Co-op Multiplayer Mod**. This documentation is organized into technical design specifications and user-facing feature guides.
+Welcome to the technical design and feature documentation for the **shapez.io Steam Co-op Multiplayer Mod**. This documentation is organized into technical design specifications, user-facing feature guides, and contributor/agent guidelines.
 
 ---
 
@@ -13,21 +13,21 @@ Deep-dives into the mod's architecture, underlying protocols, and game engine ho
   * Electron dual-process architecture (Main vs. Renderer).
   * Safe ASAR binary archive patching and integrity preservation.
   * Electron IPC communication bridge (`preload.js`).
-  * Unpacked native Greenworks binary handling.
+  * Native C++ modules: Greenworks and Native Steam P2P Addon (`steam_p2p_win64.node`).
 
 * [**Networking Protocol & Transports**](technical-design/networking-protocol.md)
-  * Dual-transport layer: Direct TCP Sockets and WebRTC Peer-to-Peer.
+  * Dual-transport layer: Direct TCP Sockets and Native Steamworks P2P (`ISteamNetworking`).
   * Length-prefixed framing protocol (4-byte Big-Endian).
-  * Out-of-band Steam Chat signaling (`[SHAPEZ_MP]:...`).
+  * Steam Lobby Data signaling with zero Steam chat spam.
   * Chunked initial world transfer (`WELCOME_WORLD` in 48 KB slices).
-  * Network packet schema reference.
+  * Comprehensive network packet schema reference.
 
 * [**Synchronization Engine**](technical-design/synchronization-engine.md)
   * `shapez.ModInterface` method interception.
   * Delta action catalog (`ACT_PLACE`, `ACT_DELETE`, `ACT_SIGNAL`, etc.).
   * Recursion & echo-loop prevention (`isApplyingRemote`).
   * Hub goals, upgrades, waypoints, and pinned shape synchronization.
-  * Client resync protocol.
+  * Client savegame isolation and on-demand resync protocol.
 
 ---
 
@@ -37,23 +37,29 @@ Guides detailing in-game features, Steamworks integration, and development tools
 * [**Steamworks Integration**](features/steam-integration.md)
   * Steam Lobby lifecycle (Create, Join, Leave, Member data).
   * Steam Friends list detection and live status polling.
-  * Steam Overlay invites (`Shift+Tab`) and custom toast notifications.
+  * Native Steam Overlay invites (`Shift+Tab`) and custom toast notifications.
   * Rich Presence integration.
   * Fallback mode for non-Steam or offline environments.
 
 * [**Co-op HUD & Social Features**](features/coop-hud-and-social.md)
-  * In-game Multiplayer HUD panel and player roster.
-  * Live cursor streaming and interpolation.
+  * Draggable in-game Multiplayer HUD panel and player roster.
+  * Live cursor streaming, interpolation, and multi-instance ID disambiguation.
   * Real-time ghost building placement previews.
   * Off-screen player tracking arrows.
   * Animated radar map pings (<kbd>P</kbd>).
-  * In-game team chat.
+  * In-game team chat with smooth auto-scrolling.
 
-* [**Multi-Instance Testing & Troubleshooting**](features/testing-and-troubleshooting.md)
+* [**Testing, Tooling & Troubleshooting**](features/testing-and-troubleshooting.md)
   * Single-PC dual-window testing (`npm run launch-client`).
-  * Command-line switches: `--multi-instance`, `--instance-id`, `--dev`.
-  * Automated test suite (`verify-mod.js`).
-  * Common troubleshooting scenarios (firewalls, port conflicts, Steam overlay).
+  * Multi-tiered automated test suite (`npm test`: syntax check, 7 unit test suites, E2E simulation).
+  * Standalone installer CLI switches (`--backup`, `--silent`, `--uninstall`, etc.).
+  * Automated savegame backup utilities (`npm run backup-saves`).
+  * Common troubleshooting scenarios (firewalls, port conflicts, safe mode).
+
+---
+
+### 🤖 Contributor & Agent Guidelines
+* [**Agent & Contributor Guidelines (`AGENTS.md`)](../AGENTS.md): Coding conventions, documentation freshness rules, test execution, and architecture boundaries for human and AI contributors.
 
 ---
 
@@ -61,19 +67,33 @@ Guides detailing in-game features, Steamworks integration, and development tools
 
 ```text
 shapez-steam-multiplayer-mod/
+├── AGENTS.md                   # Instructions and standards for AI coding agents & contributors
 ├── docs/                       # Permanent documentation hub
 │   ├── README.md               # Documentation table of contents (this file)
 │   ├── technical-design/       # Architecture, networking, and sync engine design docs
 │   └── features/               # Steamworks, HUD, social, and testing guides
 ├── scripts/
+│   ├── backup-saves.js         # Timestamped .zip save game backup tool
+│   ├── build-dist.js           # Production release packager and installer compiler
+│   ├── build-native-p2p.js     # Standalone PE64 assembler for steam_p2p_win64.node
+│   ├── check-syntax.js         # AST syntax validator across all JS files
+│   ├── get-next-version.js     # Semantic version calculator for releases
 │   ├── install-mod.js          # ASAR binary patcher and mod installer
+│   ├── launch-coop-client.js   # Isolated secondary instance launcher
 │   ├── uninstall-mod.js        # Vanilla restoration tool
-│   ├── verify-mod.js           # Automated end-to-end verification test suite
-│   ├── build-dist.js           # Production release packager
-│   └── launch-coop-client.js   # Isolated secondary instance launcher
+│   └── verify-mod.js           # Automated end-to-end verification test suite
 ├── src/
 │   ├── steam_multiplayer.js    # In-game client mod (Renderer process)
 │   ├── steam_bridge.js         # Electron Main-process Steam & TCP IPC bridge
+│   ├── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon
 │   └── installer/              # C# WinForms standalone installer source (Program.cs)
+├── tests/                      # Native Node.js unit test suite (node --test)
+│   ├── asar-patcher.test.js    # ASAR pickle header and in-place patching tests
+│   ├── dist-package.test.js    # Release packaging and distribution tests
+│   ├── framing.test.js         # 4-byte BE framing and stream reassembly tests
+│   ├── installer-cli.test.js   # Installer binary CLI smoke tests
+│   ├── join-code.test.js       # Join code encoding/decoding and sanitizer tests
+│   ├── network-resilience.test.js # Buffer resilience, chunking, and port failover tests
+│   └── savegame-isolation.test.js # Savegame isolation and dedicated coop slot tests
 └── package.json
 ```

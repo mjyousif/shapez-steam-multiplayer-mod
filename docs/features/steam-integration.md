@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The mod integrates directly with Valve's **Steamworks SDK** via **Greenworks**, providing native Steam multiplayer features without requiring external accounts, servers, or registration.
+The mod integrates directly with Valve's **Steamworks SDK** via **Greenworks** and a custom native PE64 **`ISteamNetworking`** Node addon (`src/steam_p2p_win64.node`), providing native Steam multiplayer features without requiring external accounts, servers, or registration.
 
 All Steam operations are bridged through the Electron Main Process (`src/steam_bridge.js`) and rendered dynamically inside the game menu and in-game HUD (`src/steam_multiplayer.js`).
 
@@ -22,18 +22,17 @@ All Steam operations are bridged through the Electron Main Process (`src/steam_b
 * **Lobby Metadata**: The lobby stores metadata keys including `status: "hosting"`, `version: "1.5.7"`, and `endpoint`, allowing friends to detect active sessions automatically.
 * **Auto-Discovery**: Connected players leave the lobby cleanly upon exiting or disconnecting.
 
-### 2.2 Live Steam Friends Detection
+### 2.2 Live Steam Friends Detection & Native P2P Joining
 In the **Steam Multiplayer** menu, the right-hand column dynamically lists your online Steam Friends:
 * **Active Host Detection**: If a Steam friend is hosting a Co-op factory, their entry is highlighted in **emerald green** with a prominent **Join Game** button.
-* **One-Click Joining**: Clicking **Join Game** automatically extracts their lobby ID and negotiates a WebRTC or TCP connection without needing to type IP addresses.
+* **One-Click Joining**: Clicking **Join Game** automatically extracts their lobby ID and negotiates a native Steamworks P2P (`ISteamNetworking`) or direct TCP connection without needing to type IP addresses.
+* **Zero Chat Spam**: No out-of-band Steam friend chat messages are sent or intercepted; all connection handshaking occurs via Steam Lobby Data and Valve's Steam Datagram Relay.
 
 ### 2.3 Invitations & Native Steam Overlay
 * **Native Steam Overlay (`Shift+Tab`)**:
   * Clicking **Invite Friends** opens the official Steam Overlay Friends Invite dialog (`greenworks.activateGameOverlayInviteDialog`).
 * **Direct In-Game Invites**:
-  * Clicking the **Invite** button next to a friend's name in the Friends list sends a dual notification:
-    1. An in-game green toast notification to their running game window.
-    2. A Steam Chat message with the session's clickable Join Code.
+  * Clicking the **Invite** button next to a friend's name in the Friends list broadcasts an in-game invite notification directly to their running game window.
 * **In-Game Invite Toasts**:
   * When a friend invites you, an animated green banner appears in the top-right corner of your screen showing the friend's name and an **Accept & Join** button.
 
