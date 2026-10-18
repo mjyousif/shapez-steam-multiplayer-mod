@@ -29,8 +29,11 @@ describe("Distribution Package and Artifact Integrity", () => {
     });
 
     test("dist directory contains distribution zip archive with valid PKZIP header", () => {
-        const zipPath = path.join(distDir, "shapez-steam-coop-mod-v1.0.0.zip");
-        if (!fs.existsSync(zipPath)) {
+        const zipFiles = fs.existsSync(distDir)
+            ? fs.readdirSync(distDir).filter(f => f.startsWith("shapez-steam-coop-mod-") && f.endsWith(".zip"))
+            : [];
+        const zipPath = zipFiles.length > 0 ? path.join(distDir, zipFiles[0]) : null;
+        if (!zipPath || !fs.existsSync(zipPath)) {
             console.log("   [SKIP] Release zip archive not built yet.");
             return;
         }

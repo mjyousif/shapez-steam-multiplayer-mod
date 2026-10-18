@@ -394,11 +394,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         this.clientHelloTimer = null;
         this.isConnecting = false;
         this.joinOverlayEl = null;
+        this.updateInfo = null;
 
         this.injectStyles();
         this.setupIpcListeners();
         this.setupGameHooks();
         this.refreshSteamStatus();
+        this.checkForUpdates();
 
         // Register HUD element in-game
         this.modInterface.registerHudElement("multiplayer", HUDMultiplayer);
@@ -493,6 +495,65 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             console.warn("[Steam MP] Could not query steam:mp:get-status (Bridge may not be installed):", err);
             this.updateMainMenuBadge();
         }
+    }
+
+    async checkForUpdates() {
+        try {
+            if (typeof fetch === "undefined") return;
+            const res = await fetch(
+                "https://api.github.com/repos/mjyousif/shapez-steam-multiplayer-mod/releases/latest",
+                {
+                    headers: { Accept: "application/vnd.github.v3+json" },
+                }
+            );
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data || !data.tag_name) return;
+
+            const latestTag = String(data.tag_name).replace(/^v/i, "").trim();
+            const currentVer = String(METADATA.version).replace(/^v/i, "").trim();
+
+            if (this.compareVersions(latestTag, currentVer) > 0) {
+                this.updateInfo = {
+                    version: latestTag,
+                    url: data.html_url || "https://github.com/mjyousif/shapez-steam-multiplayer-mod/releases/latest",
+                    name: data.name || `v${latestTag}`,
+                    isNewer: true,
+                };
+                this.logInfo(`Update available: v${latestTag} (current: v${currentVer})`);
+                this.updateMainMenuBadge();
+            }
+        } catch {
+            // Silently ignore network errors / offline mode
+        }
+    }
+
+    compareVersions(vA, vB) {
+        const pa = String(vA).split(".").map(x => parseInt(x, 10) || 0);
+        const pb = String(vB).split(".").map(x => parseInt(x, 10) || 0);
+        const max = Math.max(pa.length, pb.length);
+        for (let i = 0; i < max; i++) {
+            const a = pa[i] || 0;
+            const b = pb[i] || 0;
+            if (a > b) return 1;
+            if (a < b) return -1;
+        }
+        return 0;
+    }
+
+    openExternalUrl(url) {
+        try {
+            if (typeof require !== "undefined") {
+                const { shell } = require("electron");
+                if (shell && shell.openExternal) {
+                    shell.openExternal(url);
+                    return;
+                }
+            }
+        } catch {}
+        try {
+            window.open(url, "_blank");
+        } catch {}
     }
 
     setupIpcListeners() {
@@ -2224,14 +2285,30 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     }
 
     updateMainMenuBadge() {
-        const dot = document.querySelector(".mpMainMenuBtn .mpSteamDot");
-        if (dot) {
-            dot.classList.remove("online", "warning");
-            if (this.steamStatus?.initialized) {
-                dot.classList.add("online");
-            } else if (this.bridgeAvailable === false) {
-                dot.classList.add("warning");
-                dot.title = "Steamworks bridge unpatched. Run ShapezCoopInstaller.exe to patch app.asar";
+        const btn = document.querySelector(".mpMainMenuBtn");
+        if (btn) {
+            const dot = btn.querySelector(".mpSteamDot");
+            if (dot) {
+                dot.classList.remove("online", "warning");
+                if (this.steamStatus?.initialized) {
+                    dot.classList.add("online");
+                } else if (this.bridgeAvailable === false) {
+                    dot.classList.add("warning");
+                    dot.title = "Steamworks bridge unpatched. Run ShapezCoopInstaller.exe to patch app.asar";
+                }
+            }
+
+            let badge = btn.querySelector(".mpUpdateNoticePill");
+            if (this.updateInfo && this.updateInfo.isNewer) {
+                if (!badge) {
+                    badge = document.createElement("span");
+                    badge.className = "mpUpdateNoticePill";
+                    btn.appendChild(badge);
+                }
+                badge.innerText = `Update v${this.updateInfo.version}`;
+                badge.title = `A new version (v${this.updateInfo.version}) of shapez Steam Co-op is available!`;
+            } else if (badge) {
+                badge.remove();
             }
         }
     }
@@ -2267,6 +2344,20 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                     <strong>Steamworks Bridge Unpatched:</strong> The core game archive (<code>resources\\app.asar</code>) has not been patched. Steam lobbies, invites, and multi-instance sync require running <strong>ShapezCoopInstaller.exe</strong> with shapez closed.
                 </div>
                 ` : ""}
+
+                ${
+                    this.updateInfo?.isNewer
+                        ? `
+                <div class="mpUpdateModalBanner">
+                    <div class="mpUpdateModalText">
+                        <strong>★ Update Available: v${escapeHtml(this.updateInfo.version)}</strong> (Currently installed: v${escapeHtml(METADATA.version)})
+                        <div class="mpUpdateModalSub">A newer release of shapez Steam Co-op is available on GitHub with updates and fixes.</div>
+                    </div>
+                    <button class="styledButton mpOpenUpdateBtn">View Release on GitHub</button>
+                </div>
+                `
+                        : ""
+                }
 
                 ${
                     active
@@ -2422,6 +2513,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         overlay.addEventListener("click", ev => {
             if (ev.target === overlay) this.closeMultiplayerModal();
         });
+
+        const openUpdateBtn = overlay.querySelector(".mpOpenUpdateBtn");
+        if (openUpdateBtn && this.updateInfo?.url) {
+            openUpdateBtn.addEventListener("click", () => {
+                this.openExternalUrl(this.updateInfo.url);
+            });
+        }
 
         const startHostBtn = overlay.querySelector(".mpStartHostBtn");
         if (startHostBtn) {
@@ -2763,6 +2861,53 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             }
             .mpBridgeWarning strong {
                 color: #ef4444;
+            }
+            .mpUpdateNoticePill {
+                background: #f59e0b !important;
+                color: #0f172a !important;
+                font-weight: 700 !important;
+                font-size: 10px !important;
+                line-height: 1 !important;
+                padding: 3px 7px !important;
+                border-radius: 10px !important;
+                margin-left: 6px !important;
+                letter-spacing: 0.3px !important;
+            }
+            .mpUpdateModalBanner {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                background: rgba(245, 158, 11, 0.12);
+                border: 1px solid rgba(245, 158, 11, 0.4);
+                border-radius: 8px;
+                padding: 10px 14px;
+                margin-bottom: 14px;
+            }
+            .mpUpdateModalText {
+                font-size: 12px;
+                color: #fef3c7;
+                line-height: 1.4;
+            }
+            .mpUpdateModalSub {
+                font-size: 11px;
+                color: #cbd5e1;
+                margin-top: 3px;
+            }
+            .mpOpenUpdateBtn {
+                background: #f59e0b !important;
+                color: #0f172a !important;
+                font-weight: 700 !important;
+                font-size: 11px !important;
+                padding: 6px 14px !important;
+                border-radius: 4px !important;
+                white-space: nowrap !important;
+                cursor: pointer !important;
+                flex-shrink: 0 !important;
+            }
+            .mpOpenUpdateBtn:hover {
+                background: #fbbf24 !important;
+                color: #020617 !important;
             }
             .mpHostSaveBtn {
                 background: #1e3a8a !important;
