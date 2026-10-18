@@ -74,6 +74,7 @@ shapez-steam-multiplayer-mod/
 │   └── features/               # Steamworks, HUD, social, and testing guides
 ├── scripts/
 │   ├── backup-saves.js         # Timestamped .zip save game backup tool
+│   ├── build-bundle.js         # Zero-dependency module bundler and linker
 │   ├── build-dist.js           # Production release packager and installer compiler
 │   ├── build-native-p2p.js     # Standalone PE64 assembler for steam_p2p_win64.node
 │   ├── check-syntax.js         # AST syntax validator across all JS files
@@ -83,10 +84,37 @@ shapez-steam-multiplayer-mod/
 │   ├── uninstall-mod.js        # Vanilla restoration tool
 │   └── verify-mod.js           # Automated end-to-end verification test suite
 ├── src/
-│   ├── steam_multiplayer.js    # In-game client mod (Renderer process)
-│   ├── steam_bridge.js         # Electron Main-process Steam & TCP IPC bridge
-│   ├── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon
+│   ├── bridge/                 # Main Process modular units (Node.js runtime)
+│   │   ├── index.js            # Central bridge orchestrator
+│   │   ├── ipc_handlers.js     # Electron ipcMain.handle endpoints
+│   │   ├── lobby_channel.js    # Deflated zlib Steam Lobby metadata channel
+│   │   ├── logger.js           # Rotating disk log and in-memory ring buffer
+│   │   ├── native_p2p.js       # ISteamNetworking C++ addon loader
+│   │   ├── steam_client.js     # Greenworks initialization & Steam client
+│   │   └── tcp_transport.js    # 4-byte BE TCP framing and auto-increment server
+│   ├── multiplayer/            # Renderer Process modular units (Chromium sandbox)
+│   │   ├── constants.js        # Metadata and player color palettes
+│   │   ├── index.js            # Barrel module exporter
+│   │   ├── join_code.js        # Base64 Join Code parser & HTML sanitizer
+│   │   ├── mod.js              # Central Mod class and lifecycle coordinator
+│   │   ├── hud/                # HUD components
+│   │   │   └── hud_multiplayer.js # Draggable in-game multiplayer HUD
+│   │   ├── sync/               # Synchronization engine
+│   │   │   ├── actions.js      # Remote action dispatcher with reentrancy guards
+│   │   │   ├── cursors.js      # Interpolated cursors, ghosts, radar pings
+│   │   │   ├── game_hooks.js   # GameLogic & HUD method interceptors
+│   │   │   ├── hub_sync.js     # Hub goals & upgrades synchronization
+│   │   │   └── world_dump.js   # 48 KB sliced world serialization & savegame loader
+│   │   └── ui/                 # User interface elements
+│   │       ├── dialogs.js      # Modals, friends list, overlays & toasts
+│   │       └── styles.js       # Responsive CSS stylesheet injector
 │   └── installer/              # C# WinForms standalone installer source (Program.cs)
+├── bin/
+│   └── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon (generated)
+├── dist/                       # Build distribution artifacts (generated)
+│   ├── steam_bridge.js         # Compiled Electron Main Process distribution bundle
+│   ├── steam_multiplayer.js    # Compiled Chromium Renderer Process distribution bundle
+│   └── ShapezCoopInstaller.exe # Standalone Windows installer executable
 ├── tests/                      # Native Node.js unit test suite (node --test)
 │   ├── asar-patcher.test.js    # ASAR pickle header and in-place patching tests
 │   ├── dist-package.test.js    # Release packaging and distribution tests

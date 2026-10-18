@@ -38,6 +38,9 @@ The mod features a tiered testing pipeline executed via `npm test`:
 # Run the entire test pipeline (Syntax Check -> Unit Tests -> E2E Verification)
 npm test
 
+# Build distribution bundles from modular source units
+npm run build           # Assembles src/bridge/ and src/multiplayer/ into bundles
+
 # Run individual stages
 npm run check:syntax    # Validates syntax across all JS files
 npm run test:unit       # Runs 7 native unit test suites via node --test

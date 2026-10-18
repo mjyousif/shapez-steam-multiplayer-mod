@@ -15,11 +15,19 @@ const MODS_DIR = path.join(ROAMING_DIR, "shapez.io", "mods");
 const TARGET_MOD_FILE = path.join(MODS_DIR, "steam_multiplayer.js");
 
 const WORKSPACE_ROOT = path.resolve(__dirname, "..");
-const SRC_DIR = path.join(WORKSPACE_ROOT, "src");
-const SOURCE_MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
-const SOURCE_BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
+const DIST_DIR = path.join(WORKSPACE_ROOT, "dist");
+const SOURCE_MOD_FILE = path.join(DIST_DIR, "steam_multiplayer.js");
+const SOURCE_BRIDGE_FILE = path.join(DIST_DIR, "steam_bridge.js");
 const BIN_DIR = path.join(WORKSPACE_ROOT, "bin");
 const SOURCE_P2P_NODE = path.join(BIN_DIR, "steam_p2p_win64.node");
+
+// Ensure distribution bundles are assembled from modular sources
+if (!fs.existsSync(SOURCE_BRIDGE_FILE) || !fs.existsSync(SOURCE_MOD_FILE)) {
+    require("./build-bundle").main();
+}
+if (!fs.existsSync(SOURCE_P2P_NODE)) {
+    require("./build-native-p2p");
+}
 const TARGET_P2P_NODE = path.join(
     GAME_RESOURCES_DIR,
     "app.asar.unpacked",

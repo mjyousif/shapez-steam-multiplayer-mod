@@ -116,7 +116,7 @@ async function verifyMainProcessAndModEndToEnd() {
             return origLoad.apply(this, arguments);
         };
 
-        const steamPath = path.resolve(__dirname, "..", "src", "steam_bridge.js");
+        const steamPath = path.resolve(__dirname, "..", "dist", "steam_bridge.js");
         delete require.cache[steamPath];
         const steamModule = require(steamPath);
         Module._load = origLoad;
@@ -385,7 +385,7 @@ async function verifyMainProcessAndModEndToEnd() {
             stateEntered: new Signal(),
         };
 
-        const sourceModPath = path.join(__dirname, "..", "src", "steam_multiplayer.js");
+        const sourceModPath = path.join(__dirname, "..", "dist", "steam_multiplayer.js");
         const modPath = fs.existsSync(TARGET_MOD_FILE) ? TARGET_MOD_FILE : sourceModPath;
         const modSource = fs.readFileSync(modPath, "utf8");
         let registeredModClass = null;
@@ -551,10 +551,10 @@ async function verifyMainProcessAndModEndToEnd() {
 
 async function verifySteamLobbySignalingAndNoChatSpam() {
     console.log("3. Verifying Native Steamworks P2P bridge, Steam Lobby validation, and zero Friends Chat spam...");
-    const bridge = require("../src/steam_bridge");
+    const bridge = require("../dist/steam_bridge");
 
     // 1. Ensure steam_bridge.js never calls replyToFriendMessage (no Steam Friends Chat spam)
-    const bridgeSource = fs.readFileSync(path.resolve(__dirname, "..", "src", "steam_bridge.js"), "utf8");
+    const bridgeSource = fs.readFileSync(path.resolve(__dirname, "..", "dist", "steam_bridge.js"), "utf8");
     assert(
         !bridgeSource.includes("replyToFriendMessage("),
         "steam_bridge.js must never call greenworks.replyToFriendMessage (no Steam chat spam)"

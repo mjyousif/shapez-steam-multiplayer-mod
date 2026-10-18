@@ -108,7 +108,7 @@ describe("Client Savegame Isolation", () => {
 
         // Load steam_multiplayer.js in a mocked context
         const modSource = fs.readFileSync(
-            path.join(__dirname, "..", "src", "steam_multiplayer.js"),
+            path.join(__dirname, "..", "dist", "steam_multiplayer.js"),
             "utf8"
         );
 

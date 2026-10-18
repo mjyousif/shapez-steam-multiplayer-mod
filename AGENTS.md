@@ -23,11 +23,11 @@ Whenever you modify any subsystem in this repository, you **MUST** audit and upd
 ## 2. Architectural Boundaries & Invariants
 
 ### 2.1 Process Separation (Renderer vs. Main)
-* **Renderer Process (`src/steam_multiplayer.js`)**: Runs in Chromium sandbox.
+* **Renderer Process (`src/multiplayer/`, compiled to `dist/steam_multiplayer.js`)**: Runs in Chromium sandbox.
   * Intercepts `shapez.GameLogic` methods via `shapez.ModInterface`.
   * Manages UI elements (`HUDMultiplayer`), cursors, and ghost building previews.
   * **Rule**: Never require Node.js core modules (`net`, `fs`, `child_process`) directly inside the Renderer. All network I/O and Steam operations must route through `window.ipcRenderer`.
-* **Main Process (`src/steam_bridge.js`)**: Runs in Node.js runtime.
+* **Main Process (`src/bridge/`, compiled to `dist/steam_bridge.js`)**: Runs in Node.js runtime.
   * Owns the TCP framing server (`net.Server`) and client sockets (`net.Socket`).
   * Loads native C++ addons (`greenworks-win64.node` and `steam_p2p_win64.node`).
   * Manages Steam lobby state, metadata windowing, and IPC dispatch to Renderer.
@@ -98,6 +98,6 @@ The automated pipeline executes three distinct stages:
 When incrementing versions (e.g. from `1.0.2` &rarr; `1.0.3`):
 - [ ] `package.json` (`version`)
 - [ ] `src/installer/Program.cs` (lines printing version in CLI `--version`)
-- [ ] `src/steam_multiplayer.js` (`MOD_VERSION`)
+- [ ] `src/multiplayer/constants.js` (`METADATA.version`)
 - [ ] `tests/installer-cli.test.js` (expected version assertion)
 - [ ] `README.md` (badges and download links)

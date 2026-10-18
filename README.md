@@ -166,6 +166,7 @@ Full architectural and feature design documentation is available in the [`docs/`
 │   └── features/               # Steamworks, Co-op HUD, testing, and troubleshooting
 ├── scripts/
 │   ├── backup-saves.js         # Timestamped .zip save game backup tool
+│   ├── build-bundle.js         # Zero-dependency module bundler and linker
 │   ├── build-dist.js           # Production release packager and installer compiler
 │   ├── build-native-p2p.js     # Standalone PE64 assembler for steam_p2p_win64.node
 │   ├── check-syntax.js         # AST syntax validator across all JS files
@@ -177,8 +178,22 @@ Full architectural and feature design documentation is available in the [`docs/`
 ├── bin/
 │   └── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon (generated)
 ├── src/
-│   ├── steam_multiplayer.js    # The shapez.io Co-op Multiplayer mod (Renderer)
-│   ├── steam_bridge.js         # Steamworks IPC, TCP framing server, and P2P bridge
+│   ├── bridge/                 # Main Process modular units (Node.js runtime)
+│   │   ├── index.js            # Central bridge orchestrator
+│   │   ├── ipc_handlers.js     # Electron ipcMain.handle endpoints
+│   │   ├── lobby_channel.js    # Deflated zlib Steam Lobby metadata channel
+│   │   ├── logger.js           # Rotating disk log and in-memory ring buffer
+│   │   ├── native_p2p.js       # ISteamNetworking C++ addon loader
+│   │   ├── steam_client.js     # Greenworks initialization & Steam client
+│   │   └── tcp_transport.js    # 4-byte BE TCP framing and auto-increment server
+│   ├── multiplayer/            # Renderer Process modular units (Chromium sandbox)
+│   │   ├── constants.js        # Metadata and player color palettes
+│   │   ├── index.js            # Barrel module exporter
+│   │   ├── join_code.js        # Base64 Join Code parser & HTML sanitizer
+│   │   ├── mod.js              # Central Mod class and lifecycle coordinator
+│   │   ├── hud/                # HUD components (hud_multiplayer.js)
+│   │   ├── sync/               # Synchronization (actions, cursors, hooks, hub, world)
+│   │   └── ui/                 # UI components (dialogs.js, styles.js)
 │   └── installer/              # Standalone C# Windows installer GUI (Program.cs)
 └── tests/                      # Automated unit test suite (node --test)
     ├── asar-patcher.test.js    # ASAR header parsing and patching tests

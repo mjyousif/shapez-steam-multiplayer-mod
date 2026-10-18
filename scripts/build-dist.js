@@ -5,8 +5,8 @@ const { execSync } = require("child_process");
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
 const SRC_DIR = path.join(ROOT_DIR, "src");
-const BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
-const MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
+const BRIDGE_FILE = path.join(DIST_DIR, "steam_bridge.js");
+const MOD_FILE = path.join(DIST_DIR, "steam_multiplayer.js");
 const BIN_DIR = path.join(ROOT_DIR, "bin");
 const P2P_NODE_FILE = path.join(BIN_DIR, "steam_p2p_win64.node");
 
@@ -29,6 +29,9 @@ function findCsc() {
 
 function main() {
     console.log("=== Building shapez.io Co-op Multiplayer Distribution Package ===");
+
+    // Always assemble the latest distribution bundles from modular source units
+    require("./build-bundle").main();
 
     if (!fs.existsSync(P2P_NODE_FILE)) {
         require("./build-native-p2p");
