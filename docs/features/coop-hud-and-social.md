@@ -10,15 +10,16 @@ Building massive factories in Co-op requires constant coordination and communica
 
 The Co-op HUD is embedded at the top-center of the screen during gameplay (`HUDMultiplayer` in `src/steam_multiplayer.js`).
 
-### HUD Components
+### HUD Components & Layout
+* **Draggable Header Bar**: Players can click and drag the HUD header anywhere on the screen to avoid obscuring Hub deliveries, pinned goals, or hotbar selections.
 * **Status Indicator**:
   * 🟢 **Green**: Connected to active Host / Clients.
   * 🟡 **Yellow**: Connecting / Handshaking / Synchronizing world state.
   * 🔴 **Red**: Disconnected / Offline.
 * **Player Count Badge**: Displays the current number of players in the factory session.
 * **Collapse Button (`–` / `+`)**: Minimizes the HUD to a discreet pill to maximize screen space for large factory blueprints.
-* **Roster List**: Shows all active teammates with their assigned player color dot and Host status badge.
-* **Action Buttons**:
+* **Roster List**: Shows all active teammates with their assigned player color dot and Host status badge, with smooth scrolling for large teams.
+* **Action Buttons**: Formatted in a responsive, non-stretching grid:
   * **Invite Friends**: Opens the Steam Multiplayer modal / Steam Overlay.
   * **Copy Code**: Copies the session Join Code directly to the clipboard.
   * **Ping `[P]`**: Sends an animated radar map ping at your current mouse cursor coordinates.
@@ -32,6 +33,7 @@ The Co-op HUD is embedded at the top-center of the screen during gameplay (`HUDM
 Every player is assigned a unique color from the Co-op palette (Sky Blue, Rose, Purple, Emerald, Amber, Pink, Indigo, Teal).
 * Teammates' cursors are rendered in their color with their Steam username floating above.
 * Below the name, a badge indicates whether the player is currently viewing the **Regular** building layer or the **[Wires]** logic layer.
+* **Multi-Instance Disambiguation**: When multiple clients connect from the same Steam account (e.g. during local testing), the mod automatically disambiguates cursors with instance suffixes to prevent visual collisions.
 
 ### 3.2 Ghost Building Previews
 When your teammate selects any building in their hotbar (e.g. Belt, Balancer, Cutter, Painter, Stack Operator) or rotates it:
@@ -58,4 +60,5 @@ On an infinite shapez.io canvas, players frequently work thousands of tiles apar
 * An integrated chat box is embedded directly in the expandable Co-op HUD.
 * Pressing <kbd>Enter</kbd> focuses the input field; pressing <kbd>Enter</kbd> again sends the message.
 * Messages are rendered with colored author tags matching each player's cursor color.
+* Chat messages support smooth auto-scrolling to the latest entry.
 * System notifications (e.g., player joins, leaves, and factory resync events) appear automatically in the chat stream.

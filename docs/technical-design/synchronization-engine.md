@@ -24,7 +24,7 @@ flowchart TD
         EngineHook --> NetworkDispatch
     end
 
-    subgraph Network["Dual Network Layer (WebRTC / TCP)"]
+    subgraph Network["Dual Network Layer (Steam P2P / TCP)"]
         NetworkDispatch --> Transit["Serialize to Action Packet"]
     end
 
