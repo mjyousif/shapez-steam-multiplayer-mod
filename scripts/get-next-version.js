@@ -1,5 +1,6 @@
 const { execSync } = require("child_process");
 const fs = require("fs");
+const path = require("path");
 
 function getNextVersion() {
     const ref = process.env.GITHUB_REF || "";
@@ -47,12 +48,52 @@ function getNextVersion() {
     };
 }
 
-const { tag, name } = getNextVersion();
-console.log(`Target Release Tag:  ${tag}`);
-console.log(`Target Release Name: ${name}`);
+function syncVersionToFiles(rawVersion) {
+    const cleanVer = String(rawVersion).replace(/^v/i, "").trim();
+    const rootDir = path.resolve(__dirname, "..");
 
-if (process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `RELEASE_TAG=${tag}\nRELEASE_NAME=${name}\n`);
+    // 1. package.json
+    const pkgPath = path.join(rootDir, "package.json");
+    if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+        pkg.version = cleanVer;
+        fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 4) + "\n", "utf8");
+        console.log(`[Version Sync] Synchronized package.json -> v${cleanVer}`);
+    }
+
+    // 2. src/multiplayer/constants.js
+    const constantsPath = path.join(rootDir, "src", "multiplayer", "constants.js");
+    if (fs.existsSync(constantsPath)) {
+        let content = fs.readFileSync(constantsPath, "utf8");
+        content = content.replace(/version:\s*["'][^"']+["']/, `version: "${cleanVer}"`);
+        fs.writeFileSync(constantsPath, content, "utf8");
+        console.log(`[Version Sync] Synchronized src/multiplayer/constants.js -> v${cleanVer}`);
+    }
+
+    // 3. src/installer/Program.cs (fallback return value in GetEmbeddedModVersion)
+    const installerPath = path.join(rootDir, "src", "installer", "Program.cs");
+    if (fs.existsSync(installerPath)) {
+        let content = fs.readFileSync(installerPath, "utf8");
+        content = content.replace(/(catch\s*\{\s*\}\s*return\s*")[^"]+(";)/, `$1${cleanVer}$2`);
+        fs.writeFileSync(installerPath, content, "utf8");
+        console.log(`[Version Sync] Synchronized src/installer/Program.cs fallback -> v${cleanVer}`);
+    }
 }
 
-module.exports = { getNextVersion };
+if (require.main === module) {
+    const { tag, name } = getNextVersion();
+    console.log(`Target Release Tag:  ${tag}`);
+    console.log(`Target Release Name: ${name}`);
+
+    if (process.env.GITHUB_OUTPUT) {
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `RELEASE_TAG=${tag}\nRELEASE_NAME=${name}\n`);
+    }
+
+    const shouldApply = process.argv.includes("--apply") || Boolean(process.env.GITHUB_OUTPUT);
+    if (shouldApply) {
+        syncVersionToFiles(tag);
+    }
+}
+
+module.exports = { getNextVersion, syncVersionToFiles };
+

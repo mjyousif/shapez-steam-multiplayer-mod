@@ -41,10 +41,23 @@ function main() {
         fs.mkdirSync(DIST_DIR, { recursive: true });
     }
 
+    const pkg = require(path.join(ROOT_DIR, "package.json"));
     const cscPath = findCsc();
     console.log("Using C# Compiler:", cscPath);
 
     const installerCs = path.join(SRC_DIR, "installer", "Program.cs");
+    if (fs.existsSync(installerCs)) {
+        let csContent = fs.readFileSync(installerCs, "utf8");
+        const updatedCs = csContent.replace(
+            /(catch\s*\{\s*\}\s*return\s*")[^"]+(";)/,
+            `$1${pkg.version}$2`
+        );
+        if (updatedCs !== csContent) {
+            fs.writeFileSync(installerCs, updatedCs, "utf8");
+            console.log(`[Version Sync] Synchronized Program.cs fallback -> v${pkg.version}`);
+        }
+    }
+
     const outputExe = path.join(DIST_DIR, "ShapezCoopInstaller.exe");
 
     const resources = [
@@ -111,8 +124,6 @@ echo.
 pause
 `;
     fs.writeFileSync(path.join(DIST_DIR, "Uninstall-Mod.bat"), uninstallBat, "utf8");
-
-    const pkg = require(path.join(ROOT_DIR, "package.json"));
 
     // 4. Generate HOW-TO-INSTALL.txt
     const readmeTxt = `========================================================================

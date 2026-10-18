@@ -29,9 +29,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Determine Release Version
+      - name: Determine & Synchronize Release Version
         id: release_version
-        run: node scripts/get-next-version.js
+        run: node scripts/get-next-version.js --apply
 
       - name: Setup MSBuild / csc
         uses: microsoft/setup-msbuild@v2

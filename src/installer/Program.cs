@@ -310,7 +310,7 @@ namespace ShapezCoopInstaller
                 }
             }
             catch { }
-            return "1.0.2";
+            return "1.0.12";
         }
 
         public static string GetInstalledModVersion()
@@ -345,9 +345,19 @@ namespace ShapezCoopInstaller
             for (int i = 0; i < maxLen; i++)
             {
                 int numA = 0;
-                if (i < partsA.Length) int.TryParse(partsA[i], out numA);
+                if (i < partsA.Length)
+                {
+                    var mA = Regex.Match(partsA[i].Trim(), @"^\d+");
+                    if (mA.Success) int.TryParse(mA.Value, out numA);
+                    else int.TryParse(partsA[i], out numA);
+                }
                 int numB = 0;
-                if (i < partsB.Length) int.TryParse(partsB[i], out numB);
+                if (i < partsB.Length)
+                {
+                    var mB = Regex.Match(partsB[i].Trim(), @"^\d+");
+                    if (mB.Success) int.TryParse(mB.Value, out numB);
+                    else int.TryParse(partsB[i], out numB);
+                }
 
                 if (numA > numB) return 1;
                 if (numA < numB) return -1;

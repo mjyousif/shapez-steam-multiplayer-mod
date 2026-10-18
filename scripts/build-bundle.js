@@ -158,6 +158,22 @@ module.exports = __bridge;
 function buildMultiplayerBundle() {
     console.log("-> Assembling dist/steam_multiplayer.js from src/multiplayer/ modules...");
 
+    const pkgPath = path.join(ROOT_DIR, "package.json");
+    if (fs.existsSync(pkgPath)) {
+        try {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+            const constantsPath = path.join(MULTIPLAYER_DIR, "constants.js");
+            if (pkg.version && fs.existsSync(constantsPath)) {
+                let constantsCode = fs.readFileSync(constantsPath, "utf8");
+                const updatedConstants = constantsCode.replace(/version:\s*["'][^"']+["']/, `version: "${pkg.version}"`);
+                if (updatedConstants !== constantsCode) {
+                    fs.writeFileSync(constantsPath, updatedConstants, "utf8");
+                    console.log(`   [Version Sync] Synchronized src/multiplayer/constants.js -> v${pkg.version}`);
+                }
+            }
+        } catch {}
+    }
+
     const modModules = discoverModules(MULTIPLAYER_DIR);
     console.log(`   Found ${modModules.length} module(s) in src/multiplayer/`);
 
