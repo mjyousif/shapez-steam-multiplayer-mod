@@ -61,14 +61,15 @@ The automated pipeline executes three distinct stages:
 1. **`npm run check:syntax` (`scripts/check-syntax.js`)**:
    * Validates static AST syntax on all JavaScript files using Node's `vm.Script`.
 2. **`npm run test:unit` (`node --test`)**:
-   * Executes 35+ unit tests across 7 test suites under `tests/`:
+   * Executes 40+ unit tests across 8 test suites under `tests/`:
      * `asar-patcher.test.js`: Pickle headers, binary offsets, unpacked native flags.
      * `framing.test.js`: 4-byte BE TCP framing and packet fragmentation.
      * `join-code.test.js`: Base64 Join Code parsing, fallback formats, HTML escaping.
      * `network-resilience.test.js`: Malformed frames, buffer resilience, port auto-increment.
      * `savegame-isolation.test.js`: Verifies client savegame safety.
-     * `installer-cli.test.js`: Smoke tests CLI flags (`--help`, `--version`, `--backup`).
+     * `installer-cli.test.js`: Smoke tests CLI flags (`--help`, `--version`, `--backup`, `--check-update`).
      * `dist-package.test.js`: Distribution package structure.
+     * `version-check.test.js`: Version comparison invariants, semver normalization, and file synchronization.
 3. **`npm run test:e2e` (`scripts/verify-mod.js`)**:
    * End-to-end simulated Host <-> Client handshake, chunked 48 KB world dump transfer, delta action synchronization, and native Steam P2P addon validation.
 
@@ -93,11 +94,13 @@ The automated pipeline executes three distinct stages:
 
 ---
 
-## 5. Version Bumping Checklist
+## 5. Version Bumping & Synchronization
 
-When incrementing versions (e.g. from `1.0.2` &rarr; `1.0.3`):
+Automated release builds in GitHub Actions (`.github/workflows/release.yml`) use `scripts/get-next-version.js --apply` to automatically increment patch versions from git tags and synchronize all version references across the project.
+
+When manually bumping versions:
+- [ ] Run `node scripts/get-next-version.js --apply` (or update `package.json`)
 - [ ] `package.json` (`version`)
-- [ ] `src/installer/Program.cs` (lines printing version in CLI `--version`)
 - [ ] `src/multiplayer/constants.js` (`METADATA.version`)
-- [ ] `tests/installer-cli.test.js` (expected version assertion)
-- [ ] `README.md` (badges and download links)
+- [ ] `src/installer/Program.cs` (`GetEmbeddedModVersion` fallback return)
+- [ ] Run `npm test` to verify `tests/version-check.test.js` passes

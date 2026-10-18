@@ -214,8 +214,10 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
     }
 
     compareVersions(vA, vB) {
-        const pa = String(vA).split(".").map(x => parseInt(x, 10) || 0);
-        const pb = String(vB).split(".").map(x => parseInt(x, 10) || 0);
+        const cleanA = String(vA || "").replace(/^v/i, "").trim();
+        const cleanB = String(vB || "").replace(/^v/i, "").trim();
+        const pa = cleanA.split(".").map(x => parseInt(x, 10) || 0);
+        const pb = cleanB.split(".").map(x => parseInt(x, 10) || 0);
         const max = Math.max(pa.length, pb.length);
         for (let i = 0; i < max; i++) {
             const a = pa[i] || 0;

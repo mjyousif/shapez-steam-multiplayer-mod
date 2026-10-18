@@ -51,7 +51,7 @@ Guides detailing in-game features, Steamworks integration, and development tools
 
 * [**Testing, Tooling & Troubleshooting**](features/testing-and-troubleshooting.md)
   * Single-PC dual-window testing (`npm run launch-client`).
-  * Multi-tiered automated test suite (`npm test`: syntax check, 7 unit test suites, E2E simulation).
+  * Multi-tiered automated test suite (`npm test`: syntax check, 8 unit test suites, E2E simulation).
   * Standalone installer CLI switches (`--backup`, `--silent`, `--uninstall`, etc.).
   * Automated savegame backup utilities (`npm run backup-saves`).
   * Common troubleshooting scenarios (firewalls, port conflicts, safe mode).

@@ -130,7 +130,7 @@ You can test Hosting and Joining on the same computer using two side-by-side win
 | :--- | :--- |
 | `npm test` | Runs the full test suite: syntax validation, unit tests, and E2E simulation |
 | `npm run check:syntax` | Static AST syntax verification on all JS scripts and source files |
-| `npm run test:unit` | Executes 7 unit test suites via Node's native test runner (`node --test`) |
+| `npm run test:unit` | Executes 8 unit test suites via Node's native test runner (`node --test`) |
 | `npm run test:e2e` / `npm run verify` | Runs the automated ASAR integrity & Host-to-Client verification suite |
 | `npm run package` / `npm run build-dist` | Builds standalone `ShapezCoopInstaller.exe` and distribution ZIP |
 | `npm run backup-saves` | Creates a timestamped `.zip` backup of `%APPDATA%\shapez.io\saves` |
