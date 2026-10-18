@@ -1,6 +1,6 @@
 const { test, describe } = require("node:test");
 const assert = require("node:assert");
-const { encodeJoinCode, decodeJoinCode, escapeHtml } = require("../src/steam_multiplayer");
+const { encodeJoinCode, decodeJoinCode, escapeHtml } = require("../src/multiplayer");
 
 describe("Join Code and Address Parser", () => {
     test("round-trips standard IP:Port endpoint, lobbyId, and hostSteamId", () => {

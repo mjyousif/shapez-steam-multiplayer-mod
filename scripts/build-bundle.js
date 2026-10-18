@@ -16,11 +16,12 @@ const vm = require("vm");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const SRC_DIR = path.join(ROOT_DIR, "src");
+const DIST_DIR = path.join(ROOT_DIR, "dist");
 const BRIDGE_DIR = path.join(SRC_DIR, "bridge");
 const MULTIPLAYER_DIR = path.join(SRC_DIR, "multiplayer");
 
-const TARGET_BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
-const TARGET_MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
+const TARGET_BRIDGE_FILE = path.join(DIST_DIR, "steam_bridge.js");
+const TARGET_MOD_FILE = path.join(DIST_DIR, "steam_multiplayer.js");
 
 /**
  * Recursively and deterministically discovers all JavaScript source modules in a directory.
@@ -211,6 +212,9 @@ if (typeof module !== "undefined" && module.exports) {
 
 function main() {
     console.log("=== Building shapez.io Co-op Mod Distribution Bundles ===");
+    if (!fs.existsSync(DIST_DIR)) {
+        fs.mkdirSync(DIST_DIR, { recursive: true });
+    }
     buildBridgeBundle();
     buildMultiplayerBundle();
     console.log("=== Build completed successfully! ===\n");

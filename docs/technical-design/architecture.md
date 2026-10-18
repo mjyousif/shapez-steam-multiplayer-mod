@@ -201,9 +201,9 @@ flowchart TD
         BB["Micro-Closure Module Linker & AST Syntax Verifier"]
     end
 
-    subgraph Distribution["Distribution Bundles (src/)"]
-        DistBridge["src/steam_bridge.js (Main Process Bundle)"]
-        DistMod["src/steam_multiplayer.js (Renderer Mod Bundle)"]
+    subgraph Distribution["Distribution Bundles (dist/)"]
+        DistBridge["dist/steam_bridge.js (Main Process Bundle)"]
+        DistMod["dist/steam_multiplayer.js (Renderer Mod Bundle)"]
     end
 
     ModularBridge --> BB --> DistBridge

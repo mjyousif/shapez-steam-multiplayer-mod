@@ -108,10 +108,13 @@ shapez-steam-multiplayer-mod/
 │   │   └── ui/                 # User interface elements
 │   │       ├── dialogs.js      # Modals, friends list, overlays & toasts
 │   │       └── styles.js       # Responsive CSS stylesheet injector
-│   ├── installer/              # C# WinForms standalone installer source (Program.cs)
+│   └── installer/              # C# WinForms standalone installer source (Program.cs)
+├── bin/
+│   └── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon (generated)
+├── dist/                       # Build distribution artifacts (generated)
 │   ├── steam_bridge.js         # Compiled Electron Main Process distribution bundle
 │   ├── steam_multiplayer.js    # Compiled Chromium Renderer Process distribution bundle
-│   └── steam_p2p_win64.node    # Native Windows x64 ISteamNetworking addon
+│   └── ShapezCoopInstaller.exe # Standalone Windows installer executable
 ├── tests/                      # Native Node.js unit test suite (node --test)
 │   ├── asar-patcher.test.js    # ASAR pickle header and in-place patching tests
 │   ├── dist-package.test.js    # Release packaging and distribution tests

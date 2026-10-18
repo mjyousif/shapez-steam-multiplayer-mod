@@ -6,9 +6,6 @@ dist/
 bin/
 obj/
 *.node
-# Generated distribution bundles (assembled on demand from src/bridge/ and src/multiplayer/)
-src/steam_bridge.js
-src/steam_multiplayer.js
 
 # Temporary and backup files
 *.tmp
