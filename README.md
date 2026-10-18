@@ -60,7 +60,7 @@ npm run install-mod
 **What this does:**
 1. Backs up your original `app.asar` to `C:\Program Files (x86)\Steam\steamapps\common\shapez.io\resources\app.asar.vanilla.bak` (if not already backed up).
 2. Updates `index.js`, `steam.js`, and `preload.js` inside `app.asar` to enable Steamworks Lobby/Friends IPC and TCP P2P networking.
-3. Copies `src/steam_multiplayer.js` into `%APPDATA%\shapez.io\mods\steam_multiplayer.js`.
+3. Compiles and copies `dist/steam_multiplayer.js` into `%APPDATA%\shapez.io\mods\steam_multiplayer.js`.
 4. Deploys `bin/steam_p2p_win64.node` into `<GameDir>\resources\app.asar.unpacked\` for native Steamworks P2P support.
 
 ### Save Game Safety & Backups

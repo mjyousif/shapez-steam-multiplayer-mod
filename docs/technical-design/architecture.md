@@ -15,7 +15,7 @@ flowchart TB
 
     subgraph ElectronMain["Electron Main Process (Node.js Environment)"]
         IndexJS["index.js (Lifecycle, Mod Loader, Window Manager)"]
-        SteamJS["steam.js / steam_bridge.js (IPC Bridge, TCP Framing Server)"]
+        SteamJS["Electron Main Bridge (src/bridge/ -> dist/steam_bridge.js)"]
         Greenworks["Greenworks C++ Addon (.node)"]
         SteamP2P["Native Steam P2P Addon (steam_p2p_win64.node)"]
 
@@ -30,7 +30,7 @@ flowchart TB
 
     subgraph RendererProcess["Renderer Process (Chromium Web Environment)"]
         GameEngine["shapez.io Game Engine (bundle.js)"]
-        MultiplayerMod["steam_multiplayer.js (Mod, Draggable HUD, Sync Engine)"]
+        MultiplayerMod["Renderer Mod (src/multiplayer/ -> dist/steam_multiplayer.js)"]
 
         MultiplayerMod <--> GameEngine
     end
@@ -47,8 +47,8 @@ flowchart TB
 
 ## 2. Process Responsibilities
 
-### 2.1 Electron Main Process (`src/steam_bridge.js` & patched `index.js`)
-* **Environment**: Full Node.js runtime with access to native OS libraries, the filesystem, and C++ native Node addons (`.node`).
+### 2.1 Electron Main Process (`src/bridge/` & patched `index.js`)
+* **Environment**: Full Node.js runtime with access to native OS libraries, the filesystem, and C++ native Node addons (`.node`). Compiled into `dist/steam_bridge.js` for injection into `app.asar`.
 * **Responsibilities**:
   * **Steamworks Matchmaking & Profile Bridge**: Initializes and interfaces with Greenworks (`shapez.io-private-artifacts/steam/greenworks`). Exposes Steam Lobby management, Steam Friends presence, Steam Overlay triggers, and Rich Presence to the renderer via Electron IPC.
   * **Native Steamworks P2P Engine**: Loads `steam_p2p_win64.node` to bind directly to Valve's `ISteamNetworking` subsystem. Manages Channel 0 (reliable actions/state) and Channel 1 (unreliable high-frequency cursors) with a 15ms drain poll.
@@ -74,8 +74,8 @@ flowchart TB
     ```
   * Prevents listener memory leaks when reloading states.
 
-### 2.3 Renderer Process (`src/steam_multiplayer.js`)
-* **Environment**: Chromium Web Engine (`shapez.GameRoot`, Canvas UI).
+### 2.3 Renderer Process (`src/multiplayer/`)
+* **Environment**: Chromium Web Engine (`shapez.GameRoot`, Canvas UI). Compiled into `dist/steam_multiplayer.js` and loaded via `%APPDATA%\shapez.io\mods\steam_multiplayer.js`.
 * **Responsibilities**:
   * Extends `shapez.Mod` and injects `HUDMultiplayer extends shapez.BaseHUDPart` (draggable roster, action buttons, smooth scrolling, team chat).
   * Intercepts game mutations via `shapez.ModInterface` (`tryPlaceBuilding`, `tryDeleteBuilding`, `clearBelts`, `tryUnlockUpgrade`, etc.).
@@ -161,10 +161,8 @@ Additionally, `steam.js` detects whether Greenworks successfully initialized:
 
 ## 5. Modular Source Architecture & Bundling Pipeline
 
-### 5.1 Architecture Motivation
-In previous versions, `src/steam_bridge.js` (~1.8k lines) and `src/steam_multiplayer.js` (~3.5k lines) were monolithic files containing all networking, UI, hooks, synchronization, and logging logic in single massive scripts.
-
-To improve maintainability, comprehensibility, and testability while strictly adhering to shapez.io's distribution constraints, the codebase is structured into modular source units aggregated via a zero-dependency linker (`scripts/build-bundle.js`).
+### 5.1 Modular Architecture & Build Model
+The codebase is structured into discrete, single-responsibility source units under `src/bridge/` (Electron Main Process) and `src/multiplayer/` (Chromium Renderer Sandbox). To satisfy shapez.io's mod loader and ASAR runtime requirements, a zero-dependency linker (`scripts/build-bundle.js`) aggregates these modules into self-contained distribution bundles under `dist/` (`dist/steam_bridge.js` and `dist/steam_multiplayer.js`).
 
 ```mermaid
 flowchart TD

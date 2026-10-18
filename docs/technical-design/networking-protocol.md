@@ -11,7 +11,7 @@ The Co-op Multiplayer Mod features a **dual-transport networking engine** design
 flowchart LR
     subgraph Host["Host Player"]
         HTCP["TCP Framing Server (:27080)"]
-        HBridge["Electron Main Bridge (steam_bridge.js)"]
+        HBridge["Electron Main Bridge (src/bridge/ -> dist/steam_bridge.js)"]
         HNativeP2P["Native Steam P2P Addon (ISteamNetworking)"]
         HLobby["Steamworks Lobby API"]
         HMod["Mod Core (Renderer)"]
@@ -24,7 +24,7 @@ flowchart LR
 
     subgraph Client["Joining Client"]
         CTCP["TCP Client Socket"]
-        CBridge["Electron Main Bridge (steam_bridge.js)"]
+        CBridge["Electron Main Bridge (src/bridge/ -> dist/steam_bridge.js)"]
         CNativeP2P["Native Steam P2P Addon (ISteamNetworking)"]
         CLobby["Steamworks Lobby API"]
         CMod["Mod Core (Renderer)"]
@@ -44,7 +44,7 @@ flowchart LR
 
 ## 2. Transport Layer Details
 
-### 2.1 Direct TCP Framing Layer (`src/steam_bridge.js`)
+### 2.1 Direct TCP Framing Layer (`src/bridge/tcp_transport.js`)
 
 Node.js TCP sockets (`net.Socket`) transmit arbitrary byte streams rather than discrete message packets. Without framing, multiple JSON packets can be merged into a single `data` event, or a large JSON packet can be fragmented across multiple read buffers.
 
@@ -124,7 +124,7 @@ Unlike older implementations that relied on user chat messages (`[SHAPEZ_MP]:...
 * **Session Handshake**: Once a client joins the host's Steam Lobby, peer-to-peer data packets are transmitted directly over Valve's encrypted Steam Datagram Relay.
 
 #### Fallback Metadata Transport (Test & Mock Environments)
-If native P2P is unavailable (such as in headless CI environments without `steam_api64.dll`), `steam_bridge.js` includes a windowed, zlib-compressed fallback channel over Steam Lobby Data (`encodeLobbyWindow`, `decodeLobbyWindow`), ensuring connectivity in unit-test harnesses.
+If native P2P is unavailable (such as in headless CI environments without `steam_api64.dll`), `src/bridge/lobby_channel.js` (compiled into `dist/steam_bridge.js`) provides a windowed, zlib-compressed fallback channel over Steam Lobby Data (`encodeLobbyWindow`, `decodeLobbyWindow`), ensuring connectivity in unit-test harnesses.
 
 ---
 
@@ -135,7 +135,7 @@ A shapez.io factory savegame dump can range from 200 KB to over 10 MB depending 
 To ensure smooth delivery without frame drops, `sendChunkedToPeer()` splits the payload into **48 KB slices**:
 
 ```javascript
-// src/steam_multiplayer.js
+// src/multiplayer/sync/world_dump.js
 sendChunkedToPeer(peer, message) {
     const raw = JSON.stringify(message);
     const CHUNK_SIZE = 49152; // 48 KB

@@ -89,7 +89,7 @@ function sendToRenderer(channel, payload) {
  * Searches:
  * 1. `process.resourcesPath/app.asar.unpacked/...` (Production installed game)
  * 2. Relative `../app.asar.unpacked/...` (Local development environment)
- * 3. Direct sibling `src/steam_p2p_win64.node` (Build tree)
+ * 3. Repository `bin/steam_p2p_win64.node` or local sibling (Build tree)
  *
  * @returns {object | null} Native addon module or null if unavailable.
  */
