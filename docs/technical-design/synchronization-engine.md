@@ -134,13 +134,13 @@ When Player A places a belt:
 ## 4. World State Bootstrap & Resync
 
 ### 4.1 Initial World Loading & Savegame Isolation (`loadHostWorldDump`)
-When a client joins an existing session:
+When a client joins an existing session or initiates a resync:
 1. The Host serializes the entire current simulation state:
    ```javascript
    const serializer = new shapez.SavegameSerializer();
    const dump = serializer.generateDumpFromGameRoot(this.currentRoot, false);
    ```
-2. The Host sends the serialized dump (chunked in 48 KB packets) via `WELCOME_WORLD`.
+2. The Host sends the serialized dump (chunked in 48 KB packets) via `WELCOME_WORLD`, stamped with `actionSeq` and `hubSeq`.
 3. **Savegame Isolation Guarantee**: To prevent overwriting the player's personal singleplayer factory if they joined while already in-game, the mod never mutates `this.currentRoot.savegame`. Instead, it allocates a dedicated new savegame instance (`this.app.savegameMgr.createNewSavegame()`) and tracks it as `this.activeCoopSavegame`:
    ```javascript
    let savegame = this.activeCoopSavegame;
@@ -156,48 +156,86 @@ When a client joins an existing session:
        mods: shapez.MODS.getModsListForSavegame(),
    };
    savegame.metaDataRef.name = "Co-op (" + safeHost + ")";
-   this.app.stateMgr.moveToState("InGameState", { savegame, fastEnter: true });
    ```
-4. On subsequent on-demand resyncs (`REQUEST_RESYNC`), the mod reuses `this.activeCoopSavegame` rather than spawning duplicate save slots.
+4. **Seamless In-Game Reloading**: In shapez.io, calling `app.stateMgr.moveToState("InGameState")` while already inside `InGameState` is rejected with an error by the game's state machine. To enable live resync without forcing the player to leave and rejoin:
+   - If the player is currently in `InGameState`, the mod sets `this.isReloadingWorld = true` and `this.pendingWorldEntry = () => this.app.stateMgr.moveToState("InGameState", { savegame, fastEnter: true })`.
+   - It transitions temporarily through `MainMenuState`: `this.app.stateMgr.moveToState("MainMenuState")`.
+   - The mod listens on `stateEntered`; when `MainMenuState` finishes entering, it intercepts the transition, executes `pendingWorldEntry()`, and cleanly transitions back into `InGameState` with the fresh snapshot.
+   - The `isReloadingWorld` flag ensures the client does not close its network socket or trigger disconnection cleanup during this transient cycle.
 
 ### 4.2 On-Demand Resynchronization (`REQUEST_RESYNC`)
-If a client experiences network packet loss or joins late during a massive blueprint paste:
+If a client experiences network packet loss or needs to refresh their local state:
 1. The client clicks the **Resync** button on the Multiplayer HUD.
 2. The client transmits `{ type: "REQUEST_RESYNC" }` to the Host.
-3. The Host generates a fresh world dump snapshot and transmits a new `WELCOME_WORLD` packet.
-4. The client replaces their local map state instantly.
+3. The Host generates a fresh world dump snapshot and transmits a new chunked `WELCOME_WORLD` packet.
+4. The client replaces their local map state seamlessly via the reload cycle.
 
 ---
 
 ## 5. Hub Goals & Upgrade Synchronization
 
-### 5.1 Shared Research Tiers (`ACT_UPGRADE`)
-When any player purchases a speed upgrade or tool tier in the Hub:
-```javascript
-// Local buy intercepted
-self.dispatchNetworkAction({
-    type: "ACT_UPGRADE",
-    upgradeId,
-});
+### 5.1 Host-Authoritative Progression & Multiplier Invariants
+In vanilla shapez.io, upgrading a tier (belts, miners, processors, painters) mutates two distinct data structures in `shapez.HubGoals`:
+1. `upgradeLevels[upgradeId]`: An integer tier count (e.g., Tier II = 1, Tier III = 2, Tier IV = 3).
+2. `upgradeImprovements[upgradeId]`: A floating-point speed multiplier (e.g., 1.5x, 2.0x, 2.5x).
 
-// Remote apply with desync protection
-case "ACT_UPGRADE": {
-    if (root.hubGoals && msg.upgradeId) {
-        if (!root.hubGoals.tryUnlockUpgrade(msg.upgradeId)) {
-            // Force apply if client's stored shape delivery was slightly behind host
-            const currentLv = root.hubGoals.getUpgradeLevel(msg.upgradeId);
-            root.hubGoals.upgradeLevels[msg.upgradeId] = currentLv + 1;
-            root.signals.upgradePurchased.dispatch(msg.upgradeId);
-        }
-    }
-    break;
-}
+Changing `upgradeLevels` alone without recomputing `upgradeImprovements` causes severe UI and simulation desyncs (e.g. tooltips displaying `Tier IV: x1.50 -> x2.50` where speed multipliers remain stuck at lower tiers). 
+
+To ensure exact synchronization:
+* **Host Authority**: Only the Host determines whether upgrade requirements (stored shapes) are met and authoritatively advances the research tree.
+* **Exact Multiplier Recomputation (`recomputeUpgradeImprovements`)**: Whenever the client or host applies an upgrade snapshot, `recomputeUpgradeImprovements()` calculates exact geometric progression multipliers matching vanilla `shapez.HubGoals.deserialize`:
+  ```javascript
+  const count = hubGoals.upgradeLevels[upgradeId] || 0;
+  let factor = 1.0;
+  for (let i = 0; i < count; ++i) {
+      factor *= shapez.tierImprovementPatterns[upgradeId](i);
+  }
+  hubGoals.upgradeImprovements[upgradeId] = factor;
+  ```
+* **Exact State Overwrite**: Hub state synchronization (`applyHubSync`) performs an authoritative, exact overwrite of both stored shapes and upgrade tiers—never using one-way `Math.max()` clamps—allowing corrections in either direction.
+
+### 5.2 Client Optimistic Prediction & Reconciliation
+When a client clicks an upgrade in their local Hub:
+1. **Local Prediction**: `hubSync.predictUpgrade(upgradeId)` immediately increments the client's local level and updates `upgradeImprovements`, providing zero-latency visual responsiveness without button lag or flicker.
+2. **Authoritative Request**: The client dispatches `{ type: "REQUEST_UPGRADE", upgradeId }` to the Host.
+3. **Host Validation**: The Host checks `root.hubGoals.tryUnlockUpgrade(upgradeId)`. If valid, the Host purchases the upgrade, advances story goals, and broadcasts `SYNC_HUB` with an incremented sequence number `seq` and `ackReq: upgradeId`.
+4. **Reconciliation**: When the client receives `SYNC_HUB`, it acknowledges and removes the pending prediction. If the Host rejects the request or an unconfirmed prediction exceeds `PREDICTION_TIMEOUT_MS` (3000ms), the client rolls back to the Host's authoritative level seamlessly.
+
+---
+
+## 6. Background World Checksum & Spatial Region Self-Healing
+
+Even with deterministic action dispatch, background floating point rounding, late joins, or transient dropped frames could theoretically introduce subtle tile discrepancies. To guarantee factory synchronization without user intervention:
+
+```mermaid
+flowchart TD
+    HostTick["Host Heartbeat (every 3000ms)"] --> ComputeRoot["Compute FNV-1a Root Checksum"]
+    ComputeRoot --> BroadcastCheck["Broadcast SYNC_CHECK(rootHash, actionSeq)"]
+    BroadcastCheck --> ClientCompare{"Client Checksum == rootHash?"}
+    ClientCompare -- Match --> InSync["Factory Synchronized"]
+    ClientCompare -- Mismatch --> DriftCheck{"Action Grace Period Expired?"}
+    DriftCheck -- No --> Wait["Wait for In-Flight Actions"]
+    DriftCheck -- Yes --> ReqHashes["Send REQUEST_REGION_HASHES"]
+    ReqHashes --> HostSendHashes["Host Sends REGION_HASHES"]
+    HostSendHashes --> ClientDiff["Client Identifies Mismatched Regions"]
+    ClientDiff --> ReqRegions["Send REQUEST_REGIONS(regionKeys)"]
+    ReqRegions --> HostExtract["Host Extracts Regional Chunks"]
+    HostExtract --> SendRegionData["Host Sends REGION_DATA"]
+    SendRegionData --> ClientApply["Client Surgically Replaces Mismatched Chunks"]
+    ClientApply --> Healed["Self-Healing Complete (Zero Factory Reload)"]
 ```
 
-### 5.2 Periodic Hub Heartbeat (`SYNC_HUB`)
-Every 2000ms, the Host broadcasts an authoritative state packet containing:
-* Current factory level and target shape.
-* Shape delivery throughput counts.
-* Upgrade level dictionary.
+### 6.1 Spatial Region Bucketing
+* The infinite world grid is partitioned into **16x16 chunk spatial regions** (each region spanning 256x256 tiles).
+* Region coordinates are indexed via `getRegionKey(chunkX, chunkY)`.
+* Only populated chunks containing static buildings or belts are hashed, minimizing computational overhead.
 
-This guarantees that even if a single delivery signal was lost during high-speed belt throughput, all players remain on identical levels and progression states.
+### 6.2 Deterministic FNV-1a Region Hashing
+For each region, `computeRegionHashes()` iterates over constituent chunks in sorted spatial order, feeding building origins, IDs, layers, variants, and rotations into a 32-bit FNV-1a hashing function. A root hash is derived by XOR-folding all individual region hashes.
+
+### 6.3 Progressive Drift Detection & Surgical Self-Healing
+1. **Lightweight Checksum Heartbeat (`SYNC_CHECK`)**: Every 3000ms, the Host broadcasts `{ type: "SYNC_CHECK", rootHash, actionSeq }`.
+2. **In-Flight Action Grace Period**: If the client's local root hash does not match, the mod checks whether actions are currently in flight (`lastAppliedActionSeq < actionSeq`). Discrepancies within a 6000ms grace window are ignored to avoid false alarms while players are actively placing buildings.
+3. **Escalation & Region Query (`REQUEST_REGION_HASHES`)**: If a discrepancy persists beyond the grace period over consecutive checks, the client queries the Host for regional hashes via `{ type: "REQUEST_REGION_HASHES" }`.
+4. **Targeted Region Repair (`REQUEST_REGIONS` / `REGION_DATA`)**: The client compares region hashes, isolates only the differing region keys (typically just 1 or 2 regions), and requests their chunk data via `{ type: "REQUEST_REGIONS", regions }`.
+5. **Non-Disruptive Patching (`applyRegionData`)**: The Host extracts and sends the exact entities in those regions via `REGION_DATA`. The client surgically deletes and reconstructs only the affected chunks—healing the desync instantly without reloading the factory or disrupting other players.

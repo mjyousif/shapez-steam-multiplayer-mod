@@ -15,6 +15,7 @@ const { escapeHtml, encodeJoinCode, decodeJoinCode } = require("./join_code");
 const { HUDMultiplayer } = require("./hud/hud_multiplayer");
 const { Mod } = require("./mod");
 const worldDump = require("./sync/world_dump");
+const worldCheck = require("./sync/world_check");
 const actions = require("./sync/actions");
 const hubSync = require("./sync/hub_sync");
 const cursors = require("./sync/cursors");
@@ -31,6 +32,7 @@ module.exports = {
     HUDMultiplayer,
     Mod,
     worldDump,
+    worldCheck,
     actions,
     hubSync,
     cursors,

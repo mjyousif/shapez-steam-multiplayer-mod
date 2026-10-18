@@ -43,7 +43,7 @@ npm run build           # Assembles src/bridge/ and src/multiplayer/ into bundle
 
 # Run individual stages
 npm run check:syntax    # Validates syntax across all JS files
-npm run test:unit       # Runs 8 native unit test suites via node --test
+npm run test:unit       # Runs 10 native unit test suites via node --test
 npm run test:e2e        # Runs the end-to-end Host <-> Client simulation
 ```
 
@@ -51,7 +51,7 @@ npm run test:e2e        # Runs the end-to-end Host <-> Client simulation
 Performs static AST syntax verification on all project scripts, source files, and test files using Node's native `vm.Script` compiler.
 
 ### 2.2 Unit Test Suites (`tests/*.test.js`)
-Powered by Node.js's native test runner (`node --test`), covering 40+ test assertions across 8 specialized suites:
+Powered by Node.js's native test runner (`node --test`), covering 50+ test assertions across 10 specialized suites:
 1. **`tests/asar-patcher.test.js`**:
    * Inspects `app.asar` byte offsets, Chromium Pickle headers, and JSON structure.
    * Confirms `index.js`, `steam.js`, and `preload.js` patch cleanly in-place.
@@ -77,6 +77,10 @@ Powered by Node.js's native test runner (`node --test`), covering 40+ test asser
    * Verifies distribution packaging and required binary bundle inclusions.
 8. **`tests/version-check.test.js`**:
    * Validates semantic version comparison invariants, release increment logic, and inter-file synchronization (`package.json`, `constants.js`, `Program.cs`).
+9. **`tests/hub-sync.test.js`**:
+   * Validates host-authoritative snapshots, geometric speed multiplier recomputation (`recomputeUpgradeImprovements`), client optimistic prediction reconciliation, and prediction timeout expiry.
+10. **`tests/world-check.test.js`**:
+    * Tests deterministic FNV-1a hashing, 16x16 chunk spatial bucketing, regional factory chunk replacement, and drift detection grace periods with targeted auto-repair.
 
 ### 2.3 End-to-End Simulation (`scripts/verify-mod.js`)
 * Spawns two isolated simulated processes (Host and Client).

@@ -20,6 +20,8 @@
  * - Never broadcast actions unless `isSessionActive() === true`.
  */
 
+const hubSync = require("./hub_sync");
+
 /**
  * Registers all shapez.io GameLogic and HUD method hooks using the mod interface.
  *
@@ -178,14 +180,25 @@ function setupGameHooks(mod) {
             shapez.HubGoals,
             "tryUnlockUpgrade",
             function (original, [upgradeId]) {
-                const unlocked = original(upgradeId);
-                if (unlocked && !mod.isApplyingRemote && mod.isSessionActive()) {
-                    mod.dispatchNetworkAction({
-                        type: "ACT_UPGRADE",
-                        upgradeId,
-                    });
+                if (mod.role === "client" && mod.isSessionActive() && !mod.isApplyingRemote) {
+                    if (typeof this.canUnlockUpgrade === "function" && !this.canUnlockUpgrade(upgradeId)) {
+                        return false;
+                    }
+                    return hubSync.predictUpgrade(mod, this, upgradeId);
                 }
-                return unlocked;
+                return original(upgradeId);
+            }
+        );
+
+        // 7. Suppress autonomous goal completion on client; host drives progression
+        mod.modInterface.replaceMethod(
+            shapez.HubGoals,
+            "onGoalCompleted",
+            function (original, args) {
+                if (mod.role === "client" && mod.isSessionActive() && !mod.isApplyingRemote) {
+                    return false;
+                }
+                return original(...args);
             }
         );
     }
