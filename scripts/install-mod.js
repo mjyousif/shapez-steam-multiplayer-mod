@@ -18,7 +18,8 @@ const WORKSPACE_ROOT = path.resolve(__dirname, "..");
 const SRC_DIR = path.join(WORKSPACE_ROOT, "src");
 const SOURCE_MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
 const SOURCE_BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
-const SOURCE_P2P_NODE = path.join(SRC_DIR, "steam_p2p_win64.node");
+const BIN_DIR = path.join(WORKSPACE_ROOT, "bin");
+const SOURCE_P2P_NODE = path.join(BIN_DIR, "steam_p2p_win64.node");
 const TARGET_P2P_NODE = path.join(
     GAME_RESOURCES_DIR,
     "app.asar.unpacked",

@@ -99,6 +99,7 @@ function loadNativeSteamP2P() {
             "win64",
             "steam_p2p_win64.node"
         ),
+        path.join(__dirname, "..", "bin", "steam_p2p_win64.node"),
         path.join(__dirname, "steam_p2p_win64.node"),
     ].filter(Boolean);
 
