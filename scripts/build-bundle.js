@@ -23,33 +23,105 @@ const TARGET_BRIDGE_FILE = path.join(SRC_DIR, "steam_bridge.js");
 const TARGET_MOD_FILE = path.join(SRC_DIR, "steam_multiplayer.js");
 
 /**
+ * Recursively and deterministically discovers all JavaScript source modules in a directory.
+ * @param {string} dir Absolute directory path to search.
+ * @param {string} [baseDir] Base directory for calculating relative module paths.
+ * @returns {Array<{ key: string, relPath: string, fullPath: string }>} Discovered module entries.
+ */
+function discoverModules(dir, baseDir = dir) {
+    let modules = [];
+    if (!fs.existsSync(dir)) return modules;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            modules = modules.concat(discoverModules(fullPath, baseDir));
+        } else if (entry.isFile() && entry.name.endsWith(".js")) {
+            const relPath = path.relative(baseDir, fullPath).replace(/\\/g, "/");
+            const key = relPath.replace(/\.js$/, "");
+            modules.push({ key, relPath, fullPath });
+        }
+    }
+    return modules;
+}
+
+/**
+ * Returns the CommonJS micro-loader header to inject into distribution bundles.
+ * Supports context-aware relative require() resolution (./, ../, nested paths).
+ * @returns {string} Loader runtime JavaScript string.
+ */
+function getLoaderHeader() {
+    return `
+const __registeredModules = {};
+
+function __defineModule(id, factory) {
+    const key = id.replace(/\\\\/g, "/").replace(/^\\.\\//, "").replace(/\\.js$/, "");
+    __registeredModules[key] = { factory, exports: null, loaded: false };
+}
+
+function __resolve(fromDir, request) {
+    if (request.startsWith("./") || request.startsWith("../")) {
+        const combined = fromDir ? fromDir + "/" + request : request;
+        const parts = combined.split("/");
+        const resolved = [];
+        for (const part of parts) {
+            if (part === "." || part === "") continue;
+            if (part === "..") {
+                resolved.pop();
+            } else {
+                resolved.push(part);
+            }
+        }
+        return resolved.join("/").replace(/\\.js$/, "");
+    }
+    return request.replace(/\\\\/g, "/").replace(/^\\.\\//, "").replace(/\\.js$/, "");
+}
+
+function __createScopedRequire(fromFile) {
+    const fromDir = fromFile.includes("/") ? fromFile.substring(0, fromFile.lastIndexOf("/")) : "";
+    return function scopedRequire(request) {
+        const key = __resolve(fromDir, request);
+        if (__registeredModules[key]) {
+            const mod = __registeredModules[key];
+            if (!mod.loaded) {
+                const moduleObj = { exports: {} };
+                mod.loaded = true;
+                mod.exports = moduleObj.exports;
+                mod.factory(__createScopedRequire(key), moduleObj, moduleObj.exports);
+                mod.exports = moduleObj.exports;
+            }
+            return mod.exports;
+        }
+        if (typeof require === "function") {
+            return require(request);
+        }
+        return {};
+    };
+}
+`;
+}
+
+/**
  * Builds the Electron Main Process Bridge bundle (`src/steam_bridge.js`).
  */
 function buildBridgeBundle() {
     console.log("-> Assembling src/steam_bridge.js from src/bridge/ modules...");
 
-    const bridgeModules = [
-        { key: "./logger", file: "logger.js" },
-        { key: "./native_p2p", file: "native_p2p.js" },
-        { key: "./lobby_channel", file: "lobby_channel.js" },
-        { key: "./tcp_transport", file: "tcp_transport.js" },
-        { key: "./steam_client", file: "steam_client.js" },
-        { key: "./ipc_handlers", file: "ipc_handlers.js" },
-        { key: "./index", file: "index.js" },
-    ];
+    const bridgeModules = discoverModules(BRIDGE_DIR);
+    console.log(`   Found ${bridgeModules.length} module(s) in src/bridge/`);
 
     let modulesCode = "";
     for (const m of bridgeModules) {
-        const fullPath = path.join(BRIDGE_DIR, m.file);
-        const code = fs.readFileSync(fullPath, "utf8");
+        const code = fs.readFileSync(m.fullPath, "utf8");
         modulesCode += `
 // ============================================================================
-// Module: ${m.key} (${m.file})
+// Module: ${m.key} (${m.relPath})
 // ============================================================================
 __defineModule("${m.key}", function(require, module, exports) {
 ${code}
 });
-__aliasModule("${m.key}", "${m.key}.js");
 `;
     }
 
@@ -57,15 +129,7 @@ __aliasModule("${m.key}", "${m.key}.js");
  * @file src/steam_bridge.js
  * @description shapez.io Steam Co-op Mod - Electron Main Process Bridge
  * 
- * NOTE: This is the compiled self-contained bundle assembled from modular units in src/bridge/.
- * Source modules:
- *   - src/bridge/logger.js       : Persistent disk logging & in-memory ring buffer
- *   - src/bridge/native_p2p.js    : Native Steamworks P2P (Channel 0 Reliable, Channel 1 Unreliable)
- *   - src/bridge/lobby_channel.js : Compressed sliding-window Steam Lobby metadata channel
- *   - src/bridge/tcp_transport.js : 4-byte Big-Endian TCP framing & UPnP automatic router mapping
- *   - src/bridge/steam_client.js  : Greenworks Steam API bindings, Lobby lifecycle & profile
- *   - src/bridge/ipc_handlers.js  : Electron ipcMain request routing
- *   - src/bridge/index.js         : Central bridge coordinator
+ * NOTE: This is the compiled self-contained bundle dynamically assembled from modular units in src/bridge/.
  * 
  * Architectural Invariants:
  * - Thread-safe within Electron's Main Process.
@@ -73,54 +137,12 @@ __aliasModule("${m.key}", "${m.key}.js");
  * - Secondary transport: Length-prefixed TCP streaming.
  * - Zero Steam chat spam: Session discovery and signaling use Steam Lobbies and P2P packets.
  */
-
-const __registeredModules = {};
-
-function __defineModule(id, factory) {
-    __registeredModules[id] = { factory, exports: null, loaded: false };
-}
-
-function __aliasModule(targetId, aliasId) {
-    __registeredModules[aliasId] = __registeredModules[targetId];
-}
-
-function __bundleRequire(id) {
-    if (__registeredModules[id]) {
-        const mod = __registeredModules[id];
-        if (!mod.loaded) {
-            const moduleObj = { exports: {} };
-            mod.loaded = true;
-            mod.exports = moduleObj.exports;
-            mod.factory(__bundleRequire, moduleObj, moduleObj.exports);
-            mod.exports = moduleObj.exports;
-        }
-        return mod.exports;
-    }
-    // Delegate external module requirements (fs, path, net, greenworks, etc.) to Node runtime
-    return require(id);
-}
-
+${getLoaderHeader()}
 ${modulesCode}
 
-const __bridge = __bundleRequire("./index");
+const __bridge = __createScopedRequire("")("./index");
 
-module.exports = {
-    init: __bridge.init,
-    listen: __bridge.listen,
-    setMainWindow: __bridge.setMainWindow,
-    createFrameBuffer: __bridge.createFrameBuffer,
-    attachFrameParser: __bridge.attachFrameParser,
-    startTcpHost: __bridge.startTcpHost,
-    stopTcpHost: __bridge.stopTcpHost,
-    connectTcpClient: __bridge.connectTcpClient,
-    disconnectTcpClient: __bridge.disconnectTcpClient,
-    isRealSteamLobbyId: __bridge.isRealSteamLobbyId,
-    steamIdToBuffer8: __bridge.steamIdToBuffer8,
-    loadNativeSteamP2P: __bridge.loadNativeSteamP2P,
-    encodeLobbyWindow: __bridge.encodeLobbyWindow,
-    decodeLobbyWindow: __bridge.decodeLobbyWindow,
-    LOG_FILE_PATH: __bridge.LOG_FILE_PATH,
-};
+module.exports = __bridge;
 `;
 
     // Verify syntax
@@ -135,33 +157,19 @@ module.exports = {
 function buildMultiplayerBundle() {
     console.log("-> Assembling src/steam_multiplayer.js from src/multiplayer/ modules...");
 
-    const modModules = [
-        { key: "./constants", file: "constants.js" },
-        { key: "./join_code", file: "join_code.js" },
-        { key: "./hud/hud_multiplayer", file: "hud/hud_multiplayer.js" },
-        { key: "./sync/world_dump", file: "sync/world_dump.js" },
-        { key: "./sync/actions", file: "sync/actions.js" },
-        { key: "./sync/hub_sync", file: "sync/hub_sync.js" },
-        { key: "./sync/cursors", file: "sync/cursors.js" },
-        { key: "./sync/game_hooks", file: "sync/game_hooks.js" },
-        { key: "./ui/styles", file: "ui/styles.js" },
-        { key: "./ui/dialogs", file: "ui/dialogs.js" },
-        { key: "./mod", file: "mod.js" },
-        { key: "./index", file: "index.js" },
-    ];
+    const modModules = discoverModules(MULTIPLAYER_DIR);
+    console.log(`   Found ${modModules.length} module(s) in src/multiplayer/`);
 
     let modulesCode = "";
     for (const m of modModules) {
-        const fullPath = path.join(MULTIPLAYER_DIR, m.file);
-        const code = fs.readFileSync(fullPath, "utf8");
+        const code = fs.readFileSync(m.fullPath, "utf8");
         modulesCode += `
 // ============================================================================
-// Module: ${m.key} (${m.file})
+// Module: ${m.key} (${m.relPath})
 // ============================================================================
 __defineModule("${m.key}", function(require, module, exports) {
 ${code}
 });
-__aliasModule("${m.key}", "${m.key}.js");
 `;
     }
 
@@ -170,63 +178,17 @@ __aliasModule("${m.key}", "${m.key}.js");
  * @file src/steam_multiplayer.js
  * @description shapez.io Steam Co-op Multiplayer Mod (Chromium Renderer Sandbox Bundle)
  * 
- * NOTE: This is the compiled self-contained bundle assembled from modular units in src/multiplayer/.
- * Source modules:
- *   - src/multiplayer/constants.js          : METADATA & PLAYER_COLORS
- *   - src/multiplayer/join_code.js           : Base64 Join Code encoder/decoder & HTML sanitizer
- *   - src/multiplayer/hud/hud_multiplayer.js : In-game HUD element, roster, chat & pings
- *   - src/multiplayer/sync/world_dump.js     : World dump serialization, chunking & savegame isolation
- *   - src/multiplayer/sync/actions.js        : Remote action dispatcher with reentrancy protection
- *   - src/multiplayer/sync/hub_sync.js       : HubGoals & research upgrade tier synchronizer
- *   - src/multiplayer/sync/cursors.js        : Cursors, ghost building previews & map pings
- *   - src/multiplayer/sync/game_hooks.js     : GameLogic & HUD method hooks
- *   - src/multiplayer/ui/styles.js           : Injected CSS styling
- *   - src/multiplayer/ui/dialogs.js          : Main menu buttons, multiplayer modal & toasts
- *   - src/multiplayer/mod.js                 : Central Mod coordinator class
- *   - src/multiplayer/index.js               : Module aggregator barrel
+ * NOTE: This is the compiled self-contained bundle dynamically assembled from modular units in src/multiplayer/.
  * 
  * Invariants:
  * - Runs strictly within Chromium sandbox. All network & Steam operations route through window.ipcRenderer.
  * - Save Game Isolation Guarantee: Never overwrites client singleplayer saves.
  * - Reentrancy & Echo Prevention: All remote actions executed with isApplyingRemote = true.
  */
-
-const __registeredModules = {};
-
-function __defineModule(id, factory) {
-    __registeredModules[id] = { factory, exports: null, loaded: false };
-}
-
-function __aliasModule(targetId, aliasId) {
-    __registeredModules[aliasId] = __registeredModules[targetId];
-}
-
-function __bundleRequire(id) {
-    // Normalize relative path resolution (e.g. "../constants" from "hud/hud_multiplayer")
-    let normalized = id;
-    if (normalized.startsWith("../")) {
-        normalized = "./" + normalized.slice(3);
-    }
-    if (__registeredModules[normalized]) {
-        const mod = __registeredModules[normalized];
-        if (!mod.loaded) {
-            const moduleObj = { exports: {} };
-            mod.loaded = true;
-            mod.exports = moduleObj.exports;
-            mod.factory(__bundleRequire, moduleObj, moduleObj.exports);
-            mod.exports = moduleObj.exports;
-        }
-        return mod.exports;
-    }
-    if (typeof require === "function") {
-        return require(id);
-    }
-    return {};
-}
-
+${getLoaderHeader()}
 ${modulesCode}
 
-const __mpBundle = __bundleRequire("./index");
+const __mpBundle = __createScopedRequire("")("./index");
 
 const METADATA = __mpBundle.METADATA;
 const PLAYER_COLORS = __mpBundle.PLAYER_COLORS;
@@ -237,15 +199,7 @@ const HUDMultiplayer = __mpBundle.HUDMultiplayer;
 const Mod = __mpBundle.Mod;
 
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = {
-        METADATA,
-        PLAYER_COLORS,
-        escapeHtml,
-        encodeJoinCode,
-        decodeJoinCode,
-        HUDMultiplayer,
-        Mod,
-    };
+    module.exports = __mpBundle;
 }
 `;
 
@@ -267,6 +221,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    discoverModules,
     buildBridgeBundle,
     buildMultiplayerBundle,
     main,
