@@ -29,6 +29,9 @@ function findCsc() {
 function main() {
     console.log("=== Building shapez.io Co-op Multiplayer Distribution Package ===");
 
+    // Always assemble the latest distribution bundles from modular source units
+    require("./build-bundle").main();
+
     if (!fs.existsSync(P2P_NODE_FILE)) {
         require("./build-native-p2p");
     }

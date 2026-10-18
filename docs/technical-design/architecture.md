@@ -156,3 +156,85 @@ steam.listen(); // <-- Always executed, keeping Steam active
 Additionally, `steam.js` detects whether Greenworks successfully initialized:
 * **Steam Available**: Initializes Greenworks, binds `steam_p2p_win64.node`, registers Steam lobby listeners, and monitors overlay events.
 * **Steam Unavailable (Offline / Dev Fallback)**: Automatically falls back to local virtual profiles (`local_<PID>_<suffix>`), allowing multiplayer testing over direct TCP even when running offline or without the Steam client active.
+
+---
+
+## 5. Modular Source Architecture & Bundling Pipeline
+
+### 5.1 Architecture Motivation
+In previous versions, `src/steam_bridge.js` (~1.8k lines) and `src/steam_multiplayer.js` (~3.5k lines) were monolithic files containing all networking, UI, hooks, synchronization, and logging logic in single massive scripts.
+
+To improve maintainability, comprehensibility, and testability while strictly adhering to shapez.io's distribution constraints, the codebase is structured into modular source units aggregated via a zero-dependency linker (`scripts/build-bundle.js`).
+
+```mermaid
+flowchart TD
+    subgraph ModularBridge["Main Process Modules (src/bridge/)"]
+        B1["logger.js (File + Ring Buffer Log)"]
+        B2["native_p2p.js (Steam P2P C++ Addon Loader)"]
+        B3["lobby_channel.js (Zlib Metadata Channel)"]
+        B4["tcp_transport.js (4-byte BE TCP Framing & Server)"]
+        B5["steam_client.js (Greenworks & Steam Client)"]
+        B6["ipc_handlers.js (Electron ipcMain Handlers)"]
+        B7["index.js (Central Orchestrator)"]
+
+        B1 & B2 & B3 & B4 & B5 & B6 --> B7
+    end
+
+    subgraph ModularMod["Renderer Modules (src/multiplayer/)"]
+        M1["constants.js (Metadata & Colors)"]
+        M2["join_code.js (Base64 Join Codes & HTML Sanitizer)"]
+        M3["hud/hud_multiplayer.js (Draggable HUD & Chat UI)"]
+        M4["sync/world_dump.js (48 KB Sliced World Serialization)"]
+        M5["sync/actions.js (Remote Action Dispatch & Guards)"]
+        M6["sync/hub_sync.js (Hub Goals & Upgrades Sync)"]
+        M7["sync/cursors.js (Interpolation, Ghosts, Radar Pings)"]
+        M8["sync/game_hooks.js (GameLogic & HUD Hooks)"]
+        M9["ui/styles.js (CSS Injection)"]
+        M10["ui/dialogs.js (Menu Buttons, Modals & Toasts)"]
+        M11["mod.js (Central Mod Controller)"]
+        M12["index.js (Barrel Exporter)"]
+
+        M1 & M2 & M3 & M4 & M5 & M6 & M7 & M8 & M9 & M10 --> M11 --> M12
+    end
+
+    subgraph Bundler["Bundler (scripts/build-bundle.js)"]
+        BB["Micro-Closure Module Linker & AST Syntax Verifier"]
+    end
+
+    subgraph Distribution["Distribution Bundles (src/)"]
+        DistBridge["src/steam_bridge.js (Main Process Bundle)"]
+        DistMod["src/steam_multiplayer.js (Renderer Mod Bundle)"]
+    end
+
+    ModularBridge --> BB --> DistBridge
+    ModularMod --> BB --> DistMod
+```
+
+### 5.2 Main Process Modular Units (`src/bridge/`)
+* **`logger.js`**: Thread-safe rotating disk logging (`coop-multiplayer.log`) with automatic size limits (2 MB) and an in-memory 200-entry ring buffer queryable via IPC.
+* **`native_p2p.js`**: Loads `steam_p2p_win64.node`, provides 64-bit Steam ID byte buffer pack/unpack conversions, and manages Channel 0 (reliable) and Channel 1 (unreliable) message streaming.
+* **`lobby_channel.js`**: Implements the compressed zlib (`Z:`) sliding-window Steam Lobby metadata signaling channel for session discovery and fallback communications without friends chat spam.
+* **`tcp_transport.js`**: Handles 4-byte Big-Endian length header framing with 64 MB guard protections, auto-incrementing port server (`EADDRINUSE` handling), and UPnP IGD automatic port forwarding.
+* **`steam_client.js`**: Initializes Greenworks, retrieves Steam persona details, manages Steam Lobby creation and joining, and handles native Steam events.
+* **`ipc_handlers.js`**: Registers and handles all Electron `ipcMain.handle` endpoints (`steam:*`, `steam:mp:*`, `mp:net:*`).
+* **`index.js`**: Orchestrates all bridge subsystems into a cohesive singleton.
+
+### 5.3 Renderer Process Modular Units (`src/multiplayer/`)
+* **`constants.js`**: Version constants, metadata descriptors, and player color palettes.
+* **`join_code.js`**: Join Code base64 encoder and decoder, endpoint parsers, and HTML entity XSS sanitization.
+* **`hud/hud_multiplayer.js`**: The `HUDMultiplayer` class implementing the draggable in-game roster, player status badges, quick actions, and real-time chat log.
+* **`sync/world_dump.js`**: Serializes full game state, manages 48 KB chunk transfers (`WELCOME_WORLD`), and handles isolated savegame allocation.
+* **`sync/actions.js`**: Remote action dispatcher (`applyRemoteAction`) with reentrancy guards (`isApplyingRemote`).
+* **`sync/hub_sync.js`**: Synchronizes hub level completions, pinned shapes, and tech tree upgrades.
+* **`sync/cursors.js`**: Low-latency remote cursor interpolation, ghost building previews, radar pings (<kbd>P</kbd>), and screen-edge directional indicators.
+* **`sync/game_hooks.js`**: Hooks `shapez.GameLogic` methods (`tryPlaceBuilding`, `tryDeleteBuilding`, etc.) with `isInsidePlaceBuilding` recursion protection.
+* **`ui/styles.js`**: Defines and dynamically injects the mod's complete responsive CSS stylesheet into the DOM.
+* **`ui/dialogs.js`**: Builds the Main Menu multiplayer button, connection modals, friends list, join progress overlay, and toast notifications.
+* **`mod.js`**: Core `Mod` class coordinating the initialization lifecycle and linking all submodules.
+* **`index.js`**: Barrel exporter exposing the public API.
+
+### 5.4 Distribution Bundler (`scripts/build-bundle.js`)
+* **Why Bundling is Required**: shapez.io's mod loader (`%APPDATA%\shapez.io\mods\steam_multiplayer.js`), the ASAR patcher (`install-mod.js`), and the C# installer (`ShapezCoopInstaller.exe`) require self-contained single-file payloads without multi-file runtime loading overhead.
+* **Zero External Dependencies**: The bundler uses Node.js standard modules (`fs`, `path`, `vm`) to encapsulate each module in a clean micro-closure scope, preventing variable leaks while preserving full JSDoc comments and type signatures.
+* **Automated Sync**: The bundler runs automatically as part of `npm run build`, `npm run check:syntax`, `npm test`, and `npm run package`, ensuring the distribution files always reflect source changes.
+
