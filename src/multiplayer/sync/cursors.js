@@ -97,6 +97,7 @@ function broadcastLocalCursorState(mod, root) {
         variant,
         rotation,
         rotationVariant,
+        time: now,
     });
 }
 
@@ -127,10 +128,17 @@ function updateRemoteCursor(mod, msg) {
             rotation: msg.rotation || 0,
             rotationVariant: msg.rotationVariant || 0,
             lastUpdate: performance.now(),
+            lastTime: typeof msg.time === "number" ? msg.time : 0,
         };
         mod.remotePlayers.set(msg.playerId, rp);
         if (mod.currentHud) mod.currentHud.refreshUI();
     } else {
+        // Discard stale out-of-order cursor packet from jittered transport
+        if (typeof msg.time === "number") {
+            if (rp.lastTime && msg.time < rp.lastTime) return;
+            rp.lastTime = msg.time;
+        }
+
         rp.name = msg.name || rp.name;
         rp.color = msg.color || rp.color;
         rp.x = msg.x || 0;

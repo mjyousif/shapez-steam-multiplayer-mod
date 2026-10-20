@@ -43,7 +43,7 @@ npm run build           # Assembles src/bridge/ and src/multiplayer/ into bundle
 
 # Run individual stages
 npm run check:syntax    # Validates syntax across all JS files
-npm run test:unit       # Runs 10 native unit test suites via node --test
+npm run test:unit       # Runs 11 native unit test suites via node --test
 npm run test:e2e        # Runs the end-to-end Host <-> Client simulation
 ```
 
@@ -51,7 +51,7 @@ npm run test:e2e        # Runs the end-to-end Host <-> Client simulation
 Performs static AST syntax verification on all project scripts, source files, and test files using Node's native `vm.Script` compiler.
 
 ### 2.2 Unit Test Suites (`tests/*.test.js`)
-Powered by Node.js's native test runner (`node --test`), covering 50+ test assertions across 10 specialized suites:
+Powered by Node.js's native test runner (`node --test`), covering 60+ test assertions across 11 specialized suites:
 1. **`tests/asar-patcher.test.js`**:
    * Inspects `app.asar` byte offsets, Chromium Pickle headers, and JSON structure.
    * Confirms `index.js`, `steam.js`, and `preload.js` patch cleanly in-place.
@@ -68,6 +68,7 @@ Powered by Node.js's native test runner (`node --test`), covering 50+ test asser
    * Simulates malformed JSON stream recovery without dropping subsequent valid frames.
    * Verifies header bytes split across chunk boundaries.
    * Validates automatic TCP port incrementing on `EADDRINUSE` conflicts.
+   * **Adverse Network Simulation (Chaos Testing)**: Injects artificial latency, jitter, and packet loss on unreliable streams; validates that stale out-of-order cursor packets are safely rejected without backward position jumps, fragmented frames retain message ordering, and in-flight actions do not trigger spurious drift mismatch reports.
 5. **`tests/savegame-isolation.test.js`**:
    * Ensures active singleplayer savegames are never overwritten when joining co-op or resyncing.
    * Verifies dedicated `activeCoopSavegame` allocation.
@@ -79,8 +80,12 @@ Powered by Node.js's native test runner (`node --test`), covering 50+ test asser
    * Validates semantic version comparison invariants, release increment logic, and inter-file synchronization (`package.json`, `constants.js`, `Program.cs`).
 9. **`tests/hub-sync.test.js`**:
    * Validates host-authoritative snapshots, geometric speed multiplier recomputation (`recomputeUpgradeImprovements`), client optimistic prediction reconciliation, and prediction timeout expiry.
+   * **Mutation Twin**: Detects un-reconciled client state mutations; asserts that host authority rolls back mutated upgrade tiers and recomputes multipliers while dropping forged/stale sequence packets.
 10. **`tests/world-check.test.js`**:
     * Tests deterministic FNV-1a hashing, 16x16 chunk spatial bucketing, regional factory chunk replacement, and drift detection grace periods with targeted auto-repair.
+    * **Mutation Twin**: Verifies that silent client-side factory mutations (e.g. rotation discrepancies) alter the root hash and isolate to the specific region; validates that bypassing repair forces full resync escalation (eliminating hollow passes) and that auto-repair restores 100% hash equivalence.
+11. **`tests/ghost-preview.test.js`**:
+    * Validates ghost building preview rendering, rotation variants, multi-tile dimensions, and canvas context transformation calls.
 
 ### 2.3 End-to-End Simulation (`scripts/verify-mod.js`)
 * Spawns two isolated simulated processes (Host and Client).

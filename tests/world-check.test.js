@@ -226,4 +226,129 @@ describe("World Checksum and Region Self-Healing Repair", () => {
         worldCheck.handleClientSyncCheck(mockMod, { actionSeq: 10, rootHash: "deadbeef" });
         assert.strictEqual(resyncRequested, true, "Persistent divergence must trigger full resync fallback");
     });
+
+    test("Mutation Twin: detects intentional silent desync and fails oracle if auto-repair is bypassed", () => {
+        function makeEntity(x, y, layer = "regular", code = "belt", rot = 0) {
+            return {
+                layer,
+                components: {
+                    StaticMapEntity: {
+                        origin: { x, y },
+                        code,
+                        rotation: rot,
+                        rotationVariant: 0,
+                        variant: "default",
+                        getBuilding: () => ({ getId: () => code, getLayer: () => layer }),
+                    },
+                },
+            };
+        }
+
+        // 1. Initial State: Host and Client are identical
+        const hostEntities = [
+            makeEntity(2, 3, "regular", "belt", 0),
+            makeEntity(5, 5, "regular", "miner", 1),
+            makeEntity(10, 10, "regular", "balancer", 0),
+        ];
+
+        const clientEntities = [
+            makeEntity(2, 3, "regular", "belt", 0),
+            makeEntity(5, 5, "regular", "miner", 1),
+            makeEntity(10, 10, "regular", "balancer", 0),
+        ];
+
+        const hostRoot = { entityMgr: { entities: hostEntities } };
+        const clientRoot = { entityMgr: { entities: clientEntities } };
+
+        const hostHashes = worldCheck.computeRegionHashes(hostRoot);
+        const clientHashes = worldCheck.computeRegionHashes(clientRoot);
+        assert.strictEqual(
+            worldCheck.computeRootHash(clientHashes),
+            worldCheck.computeRootHash(hostHashes),
+            "Baseline: host and client root hashes must start identical"
+        );
+
+        // 2. Mutation Injection: Silently alter client state (mutate miner rotation in chunk 0_0)
+        clientEntities[1].components.StaticMapEntity.rotation = 3;
+
+        // 3. Mutation Twin Branch A (Desync Detection Oracle):
+        const mutatedClientHashes = worldCheck.computeRegionHashes(clientRoot);
+        const mutatedRootHash = worldCheck.computeRootHash(mutatedClientHashes);
+        assert.notStrictEqual(
+            mutatedRootHash,
+            worldCheck.computeRootHash(hostHashes),
+            "Oracle Verification: Mutation must alter root hash (prevents hollow passes)"
+        );
+        assert.notStrictEqual(
+            mutatedClientHashes.get("0_0"),
+            hostHashes.get("0_0"),
+            "Oracle Verification: Divergence must be isolated precisely to mutated region 0_0"
+        );
+
+        // 4. Mutation Twin Branch B (Un-repaired Control Failure):
+        let fullResyncEscalated = false;
+        const mockBypassedMod = {
+            role: "client",
+            currentRoot: clientRoot,
+            lastLocalActionAt: 0,
+            lastAppliedActionSeq: 10,
+            checkMismatchCount: 2,
+            repairRounds: 3, // Max rounds reached
+            sendToHost: () => {},
+            requestWorldResync: () => { fullResyncEscalated = true; },
+            logInfo: () => {},
+            logWarn: () => {},
+        };
+        worldCheck.handleClientSyncCheck(mockBypassedMod, { actionSeq: 10, rootHash: worldCheck.computeRootHash(hostHashes) });
+        assert.strictEqual(fullResyncEscalated, true, "Bypassed repair must escalate to full resync");
+
+        // 5. Mutation Twin Branch C (Active Self-Healing Recovery):
+        global.shapez = {
+            Vector: class {
+                constructor(x, y) {
+                    this.x = x;
+                    this.y = y;
+                }
+            },
+            gMetaBuildingRegistry: {
+                findById: id => ({ id, getId: () => id, getLayer: () => "regular" }),
+            },
+        };
+
+        const deleted = [];
+        const placed = [];
+        const mockRepairMod = {
+            role: "client",
+            currentRoot: {
+                map: {
+                    getLayerContentXY: (x, y, layer) => {
+                        return clientEntities.find(e => e.components.StaticMapEntity.origin.x === x && e.components.StaticMapEntity.origin.y === y && e.layer === layer) || null;
+                    },
+                },
+                logic: {
+                    tryDeleteBuilding: ent => {
+                        deleted.push(ent);
+                        const idx = clientEntities.indexOf(ent);
+                        if (idx !== -1) clientEntities.splice(idx, 1);
+                    },
+                    tryPlaceBuilding: args => {
+                        placed.push(args);
+                        const ent = makeEntity(args.origin.x, args.origin.y, args.building.getLayer?.() || "regular", args.building.getId(), args.rotation);
+                        clientEntities.push(ent);
+                        return ent;
+                    },
+                },
+                entityMgr: { entities: clientEntities },
+            },
+            isApplyingRemote: false,
+        };
+
+        const serializedDivergentChunks = worldCheck.serializeRegions(hostRoot, ["0_0"]);
+        worldCheck.applyRegionData(mockRepairMod, serializedDivergentChunks);
+
+        // Verify that after self-healing auto-repair, client hashes are once again 100% identical to host
+        const healedClientHashes = worldCheck.computeRegionHashes(mockRepairMod.currentRoot);
+        const healedRootHash = worldCheck.computeRootHash(healedClientHashes);
+        assert.strictEqual(healedRootHash, worldCheck.computeRootHash(hostHashes), "Self-healing repair must restore 100% hash equivalence with host");
+    });
 });
