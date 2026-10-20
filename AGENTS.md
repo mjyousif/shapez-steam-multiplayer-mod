@@ -61,17 +61,18 @@ The automated pipeline executes three distinct stages:
 1. **`npm run check:syntax` (`scripts/check-syntax.js`)**:
    * Validates static AST syntax on all JavaScript files using Node's `vm.Script`.
 2. **`npm run test:unit` (`node --test`)**:
-   * Executes 50+ unit tests across 10 test suites under `tests/`:
+   * Executes 60+ unit tests across 11 test suites under `tests/`:
      * `asar-patcher.test.js`: Pickle headers, binary offsets, unpacked native flags.
      * `framing.test.js`: 4-byte BE TCP framing and packet fragmentation.
      * `join-code.test.js`: Base64 Join Code parsing, fallback formats, HTML escaping.
-     * `network-resilience.test.js`: Malformed frames, buffer resilience, port auto-increment.
+     * `network-resilience.test.js`: Malformed frames, buffer resilience, port auto-increment, and chaos testing (latency, jitter, packet loss).
      * `savegame-isolation.test.js`: Verifies client savegame safety.
      * `installer-cli.test.js`: Smoke tests CLI flags (`--help`, `--version`, `--backup`, `--check-update`).
      * `dist-package.test.js`: Distribution package structure.
      * `version-check.test.js`: Version comparison invariants, semver normalization, and file synchronization.
-     * `hub-sync.test.js`: Host-authoritative progression, prediction reconciliation, and multiplier recalculation.
-     * `world-check.test.js`: Spatial region FNV-1a checksums, drift detection grace periods, and surgical auto-repair.
+     * `hub-sync.test.js`: Host-authoritative progression, prediction reconciliation, multiplier recalculation, and mutation twin verification.
+     * `world-check.test.js`: Spatial region FNV-1a checksums, drift detection grace periods, surgical auto-repair, and mutation twin desync detection.
+     * `ghost-preview.test.js`: Translucent ghost building placement previews, orientation variants, and multi-tile dimensional rendering.
 3. **`npm run test:e2e` (`scripts/verify-mod.js`)**:
    * End-to-end simulated Host <-> Client handshake, chunked 48 KB world dump transfer, delta action synchronization, and native Steam P2P addon validation.
 

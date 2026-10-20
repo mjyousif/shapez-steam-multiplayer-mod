@@ -279,4 +279,75 @@ describe("Hub Goals and Upgrades Synchronization", () => {
 
         assert.strictEqual(mockMod.pendingUpgrades.size, 0, "Expired prediction should be removed");
     });
+
+    test("Mutation Twin: detects un-reconciled upgrade discrepancy and verifies host authority overwrites mutated client state", () => {
+        const mockRoot = {
+            gameMode: {
+                getUpgrades: () => ({
+                    belt: [
+                        { improvement: 0.5 },
+                        { improvement: 0.5 },
+                        { improvement: 0.5 },
+                        { improvement: 0.5 },
+                    ],
+                }),
+            },
+            hubGoals: {
+                level: 3,
+                storedShapes: { "CuCuCuCu": 100 },
+                upgradeLevels: { belt: 4 }, // Mutated/hacked client level
+                upgradeImprovements: { belt: 3.0 }, // Mutated speed multiplier
+                computeNextGoal: () => {},
+            },
+            signals: {
+                upgradePurchased: { dispatch: () => {} },
+                storyGoalCompleted: { dispatch: () => {} },
+            },
+        };
+
+        const mockMod = {
+            role: "client",
+            currentRoot: mockRoot,
+            lastHubSeq: 10,
+            assignedPlayerId: "client_hack",
+            pendingUpgrades: new Map(),
+            logInfo: () => {},
+            logWarn: () => {},
+        };
+
+        // 1. Baseline Mutation Verification: Client has hacked level 4 (multiplier 3.0)
+        assert.strictEqual(mockRoot.hubGoals.upgradeLevels.belt, 4);
+        assert.strictEqual(mockRoot.hubGoals.upgradeImprovements.belt, 3.0);
+
+        // 2. Mutation Twin Branch A (Drop Stale or Forged Packets):
+        const stalePacket = {
+            type: "SYNC_HUB",
+            seq: 9, // Older than lastHubSeq (10)
+            level: 1,
+            storedShapes: {},
+            upgradeLevels: { belt: 1 },
+            gainedRewards: {},
+            ackReq: {},
+        };
+        hubSync.applyHubSync(mockMod, stalePacket);
+        assert.strictEqual(mockRoot.hubGoals.upgradeLevels.belt, 4, "Stale packet must not alter client state");
+
+        // 3. Mutation Twin Branch B (Host Authoritative Overwrite):
+        const hostPacket = {
+            type: "SYNC_HUB",
+            seq: 11,
+            level: 3,
+            storedShapes: { "CuCuCuCu": 500 },
+            upgradeLevels: { belt: 2 }, // Host authoritative level is 2
+            gainedRewards: {},
+            ackReq: {},
+        };
+        hubSync.applyHubSync(mockMod, hostPacket);
+
+        // Verify that client's mutated level is authoritatively forced back down to Host's level 2
+        assert.strictEqual(mockRoot.hubGoals.upgradeLevels.belt, 2, "Host authority must roll back mutated upgrade level");
+        // Verify that speed multiplier is automatically recomputed down to 2.0 (1.0 + 0.5 + 0.5)
+        assert.strictEqual(mockRoot.hubGoals.upgradeImprovements.belt, 2.0, "Multiplier must be recomputed authoritatively");
+        assert.strictEqual(mockMod.lastHubSeq, 11);
+    });
 });

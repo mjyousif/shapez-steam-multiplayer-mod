@@ -190,4 +190,163 @@ describe("Network Protocol Resilience and Edge Cases", () => {
             await new Promise(res => blockerServer.close(res));
         }
     });
+
+    describe("Adverse Network Simulation (Chaos Testing)", () => {
+        const cursors = require("../src/multiplayer/sync/cursors");
+        const worldCheck = require("../src/multiplayer/sync/world_check");
+
+        class ChaosNetworkChannel extends EventEmitter {
+            constructor(options = {}) {
+                super();
+                this.minLatencyMs = options.minLatencyMs || 5;
+                this.maxLatencyMs = options.maxLatencyMs || 25;
+                this.dropRate = options.dropRate || 0.0;
+                this.dropped = 0;
+                this.delivered = 0;
+            }
+
+            send(chunk, isUnreliable = false) {
+                if (isUnreliable && this.dropRate > 0 && Math.random() < this.dropRate) {
+                    this.dropped++;
+                    return;
+                }
+                const delay = this.minLatencyMs +
+                    (this.maxLatencyMs > this.minLatencyMs ? Math.random() * (this.maxLatencyMs - this.minLatencyMs) : 0);
+                setTimeout(() => {
+                    this.delivered++;
+                    this.emit("data", chunk);
+                }, delay);
+            }
+        }
+
+        test("unreliable channel: discards out-of-order jittered cursor packets without backward jumps", async () => {
+            const mockMod = {
+                getLocalPlayerInfo: () => ({ id: "local_host" }),
+                remotePlayers: new Map(),
+                currentHud: null,
+            };
+
+            const channel = new ChaosNetworkChannel({
+                minLatencyMs: 5,
+                maxLatencyMs: 35,
+                dropRate: 0.15,
+            });
+
+            const coordinatesHistory = [];
+
+            channel.on("data", packet => {
+                cursors.updateRemoteCursor(mockMod, packet);
+                const rp = mockMod.remotePlayers.get(packet.playerId);
+                if (rp) {
+                    coordinatesHistory.push({ x: rp.x, y: rp.y, lastTime: rp.lastTime });
+                }
+            });
+
+            // Dispatch 25 cursor movements along an increasing trajectory x = i * 10
+            // Intentionally transmit older packets interspersed to simulate heavy UDP reordering
+            const packets = [];
+            for (let i = 1; i <= 20; i++) {
+                packets.push({
+                    playerId: "remote_peer",
+                    name: "Pilot",
+                    x: i * 10,
+                    y: i * 10,
+                    time: 1000 + i * 50,
+                });
+            }
+
+            // Shuffle packet transmission slightly to simulate packet reordering in transit
+            for (let i = 0; i < packets.length; i++) {
+                channel.send(packets[i], true);
+                // Occasionally re-send a stale packet delayed
+                if (i === 10) {
+                    channel.send({
+                        playerId: "remote_peer",
+                        name: "Pilot",
+                        x: 20, // Stale position from i=2
+                        y: 20,
+                        time: 1000 + 2 * 50, // Old timestamp
+                    }, true);
+                }
+            }
+
+            // Wait for all delayed deliveries to settle
+            await new Promise(resolve => setTimeout(resolve, 80));
+
+            const rp = mockMod.remotePlayers.get("remote_peer");
+            assert.ok(rp, "Remote player must be created despite packet drops");
+            assert.ok(rp.x > 50, "Remote player must have progressed along trajectory");
+
+            // Verify that at no point in coordinatesHistory did lastTime decrease
+            for (let i = 1; i < coordinatesHistory.length; i++) {
+                assert.ok(
+                    coordinatesHistory[i].lastTime >= coordinatesHistory[i - 1].lastTime,
+                    "Timestamp must never travel backwards under network jitter"
+                );
+            }
+        });
+
+        test("reliable channel: delayed and fragmented delivery preserves message ordering and frame integrity", async () => {
+            const emitter = new EventEmitter();
+            const received = [];
+
+            attachFrameParser(emitter, msg => received.push(msg));
+
+            const count = 30;
+            const expected = [];
+            const frames = [];
+
+            for (let i = 0; i < count; i++) {
+                const item = { actionId: i, type: "ACT_PLACE", payload: "data_" + i };
+                expected.push(item);
+                frames.push(createFrameBuffer(item));
+            }
+
+            // Concatenate all frames and slice into irregular chaotic chunks of 1 to 13 bytes
+            const fullBuffer = Buffer.concat(frames);
+            let offset = 0;
+            const chunks = [];
+            while (offset < fullBuffer.length) {
+                const sliceSize = Math.min(fullBuffer.length - offset, 1 + Math.floor(Math.random() * 12));
+                chunks.push(fullBuffer.subarray(offset, offset + sliceSize));
+                offset += sliceSize;
+            }
+
+            // Deliver chunks sequentially across microtasks simulating network buffering
+            for (const chunk of chunks) {
+                await new Promise(res => setImmediate(res));
+                emitter.emit("data", chunk);
+            }
+
+            assert.strictEqual(received.length, count, "All reliable frames must be received intact");
+            for (let i = 0; i < count; i++) {
+                assert.strictEqual(received[i].actionId, expected[i].actionId);
+                assert.strictEqual(received[i].type, expected[i].type);
+            }
+        });
+
+        test("grace period resilience: in-flight delayed actions do not trigger spurious drift mismatch reports", () => {
+            const sentToHost = [];
+            const mockMod = {
+                role: "client",
+                currentRoot: {
+                    entityMgr: { entities: [] },
+                },
+                lastLocalActionAt: Date.now() - 150, // Placed 150ms ago, still in flight over WAN
+                lastAppliedActionSeq: 5,
+                checkMismatchCount: 0,
+                repairRounds: 0,
+                sendToHost: msg => sentToHost.push(msg),
+                requestWorldResync: () => {},
+                logInfo: () => {},
+                logWarn: () => {},
+            };
+
+            // Host sends SYNC_CHECK representing state after action 6
+            worldCheck.handleClientSyncCheck(mockMod, { actionSeq: 6, rootHash: "divergent_hash" });
+
+            assert.strictEqual(mockMod.checkMismatchCount, 0, "Grace period must suppress false mismatch while action is in flight");
+            assert.strictEqual(sentToHost.length, 0, "Must not transmit desync request during grace period");
+        });
+    });
 });
