@@ -114,7 +114,7 @@ To avoid requiring full Visual Studio C++ toolchains on end-user machines, the n
 #### Dual Channel Architecture
 The native P2P transport allocates two dedicated channels:
 * **Channel 0 — Reliable Ordered (`k_EP2PSendReliable = 2`)**: Used for gameplay actions (`ACT_PLACE`, `ACT_DELETE`, `ACT_BLUEPRINT`), world dumps (`WELCOME_WORLD`, `CHUNK_PART`), and hub state sync (`SYNC_HUB`). Retransmits dropped packets automatically and supports payloads up to 1 MB.
-* **Channel 1 — Unreliable Low-Latency (`k_EP2PSendUnreliable = 0`)**: Used for remote cursor streaming (`CURSOR`). Dropped packets are ignored in favor of newer updates, avoiding head-of-line blocking.
+* **Channel 1 — Unreliable Low-Latency (`k_EP2PSendUnreliable = 0`)**: Used for remote cursor streaming (`CURSOR`). Dropped packets are ignored in favor of newer updates, avoiding head-of-line blocking. Packets carry monotonic timestamps (`time`), and out-of-order jittered packets arriving late are discarded by receivers to prevent backward cursor jump glitches.
 
 Incoming packets on both channels are drained every 15ms via an unref'd timer (`drainP2PChannel(0)`, `drainP2PChannel(1)`).
 
@@ -165,7 +165,7 @@ All messages dispatched between Host and Clients share a common `type` property:
 | `WELCOME_WORLD` | Host &rarr; Client | Initial factory snapshot on connection or resync | `hostId`, `hostName`, `assignedColor`, `mode`, `roster`, `dump`, `actionSeq`, `hubSeq` |
 | `CHUNK_PART` | Host &harr; Client | 48 KB fragment of a large packet | `transferId`, `index`, `total`, `data` |
 | `ROSTER_UPDATE` | Host &rarr; All | Connected player roster & colors | `players: [{ id, name, color, isHost }]` |
-| `CURSOR` | Both directions | Player cursor position & active layer | `senderId`, `name`, `x`, `y`, `layer`, `buildingId`, `variant`, `rotation`, `rotationVariant` |
+| `CURSOR` | Both directions | Player cursor position & active layer | `senderId`, `name`, `x`, `y`, `layer`, `buildingId`, `variant`, `rotation`, `rotationVariant`, `time` |
 | `ACT_PLACE` | Both directions | Building, belt, or wire placed | `x`, `y`, `rotation`, `originalRotation`, `rotationVariant`, `variant`, `buildingId`, `actionSeq` |
 | `ACT_DELETE` | Both directions | Building or wire deleted | `x`, `y`, `layer`, `actionSeq` |
 | `ACT_SIGNAL` | Both directions | Constant signal code modified | `x`, `y`, `layer`, `signalCode`, `actionSeq` |
