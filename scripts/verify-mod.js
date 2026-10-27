@@ -166,6 +166,9 @@ async function verifyMainProcessAndModEndToEnd() {
                 this.x = x;
                 this.y = y;
             }
+            add(v) {
+                return new Vector(this.x + v.x, this.y + v.y);
+            }
             toTileSpace() {
                 return new Vector(Math.floor(this.x / 32), Math.floor(this.y / 32));
             }
@@ -222,6 +225,10 @@ async function verifyMainProcessAndModEndToEnd() {
                 deletedBuildings.push({ x: origin.x, y: origin.y, layer: entity.layer || "regular" });
                 return true;
             }
+            performBulkOperation(fn) { return fn(); }
+            performImmutableOperation(fn) { return fn(); }
+            checkCanPlaceEntity() { return true; }
+            freeEntityAreaBeforeBuild() {}
         }
 
         class HubGoals {
@@ -272,6 +279,43 @@ async function verifyMainProcessAndModEndToEnd() {
             HubGoals,
             GameHUD,
             SavegameSerializer,
+            Blueprint: class {
+                constructor(entities = [], cost = 0) {
+                    this.entities = entities;
+                    this.cost = cost;
+                }
+                getCost() {
+                    return this.cost;
+                }
+                tryPlace(root, targetTile) {
+                    return root.logic.performBulkOperation(() => {
+                        return root.logic.performImmutableOperation(() => {
+                            for (const n of this.entities) {
+                                const a = {
+                                    layer: n.layer || "regular",
+                                    components: {
+                                        StaticMapEntity: {
+                                            origin: n.components.StaticMapEntity.origin.add(targetTile),
+                                            rotation: n.components.StaticMapEntity.rotation || 0,
+                                            originalRotation: n.components.StaticMapEntity.originalRotation || 0,
+                                            rotationVariant: n.components.StaticMapEntity.rotationVariant || 0,
+                                            variant: n.components.StaticMapEntity.variant || "default",
+                                            getMetaBuilding: () => ({ getId: () => n.components.StaticMapEntity.buildingId }),
+                                            getVariant: () => n.components.StaticMapEntity.variant || "default",
+                                            getRotationVariant: () => n.components.StaticMapEntity.rotationVariant || 0,
+                                        },
+                                        Lever: { toggled: false },
+                                        ConstantSignal: { signal: null },
+                                    },
+                                };
+                                root.map.placeStaticEntity(a);
+                                root.entityMgr.registerEntity(a);
+                            }
+                            return this.entities.length > 0;
+                        });
+                    });
+                }
+            },
             defaultBuildingVariant: "default",
             enumMouseButton: { left: "left", right: "right" },
             enumHubGoalRewards: { no_reward: "no_reward" },
@@ -287,6 +331,23 @@ async function verifyMainProcessAndModEndToEnd() {
                     computeOptimalDirectionAndRotationVariantAtTile: ({ rotation }) => ({
                         rotation: rotation || 0,
                         rotationVariant: 0,
+                    }),
+                    createEntity: ({ root, origin, rotation, originalRotation, rotationVariant, variant }) => ({
+                        layer: "regular",
+                        components: {
+                            StaticMapEntity: {
+                                origin,
+                                rotation: rotation || 0,
+                                originalRotation: originalRotation || 0,
+                                rotationVariant: rotationVariant || 0,
+                                variant: variant || "default",
+                                getMetaBuilding: () => ({ getId: () => id }),
+                                getVariant: () => variant || "default",
+                                getRotationVariant: () => rotationVariant || 0,
+                            },
+                            Lever: { toggled: false },
+                            ConstantSignal: { signal: null },
+                        },
                     }),
                 }),
             },
@@ -354,6 +415,23 @@ async function verifyMainProcessAndModEndToEnd() {
             },
             map: {
                 getLayerContentXY: (x, y, layer) => mapEntities.get(`${x},${y},${layer || "regular"}`),
+                placeStaticEntity: entity => {
+                    const sm = entity.components?.StaticMapEntity;
+                    if (sm && sm.origin) {
+                        const key = `${sm.origin.x},${sm.origin.y},${entity.layer || "regular"}`;
+                        mapEntities.set(key, entity);
+                        placedBuildings.push({
+                            x: sm.origin.x,
+                            y: sm.origin.y,
+                            rotation: sm.rotation || 0,
+                            variant: sm.variant || "default",
+                            buildingId: sm.getMetaBuilding ? sm.getMetaBuilding().getId() : "belt",
+                        });
+                    }
+                },
+            },
+            entityMgr: {
+                registerEntity: () => {},
             },
             logic: new GameLogic(),
             hubGoals: new HubGoals(),
@@ -386,7 +464,7 @@ async function verifyMainProcessAndModEndToEnd() {
         };
 
         const sourceModPath = path.join(__dirname, "..", "dist", "steam_multiplayer.js");
-        const modPath = fs.existsSync(TARGET_MOD_FILE) ? TARGET_MOD_FILE : sourceModPath;
+        const modPath = sourceModPath;
         const modSource = fs.readFileSync(modPath, "utf8");
         let registeredModClass = null;
         let registeredMeta = null;
@@ -523,6 +601,38 @@ async function verifyMainProcessAndModEndToEnd() {
     assert.strictEqual(hostWorld.deletedBuildings.length, 1, "Client building deletion must replicate to Host");
     assert.strictEqual(hostWorld.deletedBuildings[0].x, 22);
     assert.strictEqual(hostWorld.deletedBuildings[0].y, 30);
+
+    // 6b. Test Client blueprint paste -> replicated on Host in real-time
+    const bpEntity1 = {
+        layer: "regular",
+        components: {
+            StaticMapEntity: {
+                origin: new hostWorld.shapez.Vector(0, 0),
+                rotation: 90,
+                buildingId: "cutter",
+            },
+        },
+    };
+    const bpEntity2 = {
+        layer: "regular",
+        components: {
+            StaticMapEntity: {
+                origin: new hostWorld.shapez.Vector(1, 0),
+                rotation: 180,
+                buildingId: "rotator",
+            },
+        },
+    };
+    const clientBp = new clientWorld.shapez.Blueprint([bpEntity1, bpEntity2], 10);
+    clientBp.tryPlace(clientWorld.root, new clientWorld.shapez.Vector(50, 60));
+
+    await new Promise(r => setTimeout(r, 80));
+    const hostPlacedCutter = hostWorld.placedBuildings.find(b => b.x === 50 && b.y === 60);
+    const hostPlacedRotator = hostWorld.placedBuildings.find(b => b.x === 51 && b.y === 60);
+    assert(hostPlacedCutter, "Client blueprint paste must replicate to Host in real-time (cutter at 50, 60)");
+    assert(hostPlacedRotator, "Client blueprint paste must replicate to Host in real-time (rotator at 51, 60)");
+    assert.strictEqual(hostPlacedCutter.buildingId, "cutter");
+    assert.strictEqual(hostPlacedRotator.buildingId, "rotator");
 
     // 7. Test Hub Upgrade & Authoritative Hub Sync
     clientWorld.root.hubGoals.tryUnlockUpgrade("belt");

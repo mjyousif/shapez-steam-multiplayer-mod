@@ -29,6 +29,56 @@ function fnv1a(str, seed = 0x811c9dc5) {
 }
 
 /**
+ * Resolves the building ID from a StaticMapEntityComponent instance.
+ * Supports both real shapez.io (`getMetaBuilding()`) and unit test mocks (`getBuilding()`).
+ *
+ * @param {any} staticComp - StaticMapEntityComponent instance.
+ * @returns {string | null} Building identifier string or null.
+ */
+function resolveBuildingId(staticComp) {
+    if (!staticComp) return null;
+    if (typeof staticComp.getMetaBuilding === "function") {
+        const mb = staticComp.getMetaBuilding();
+        if (mb && typeof mb.getId === "function") return mb.getId();
+    }
+    if (typeof staticComp.getBuilding === "function") {
+        const b = staticComp.getBuilding();
+        if (b && typeof b.getId === "function") return b.getId();
+    }
+    return null;
+}
+
+/**
+ * Resolves the rotationVariant from a StaticMapEntityComponent instance.
+ * Supports both real shapez.io (`getRotationVariant()`) and unit test mocks (`rotationVariant`).
+ *
+ * @param {any} staticComp - StaticMapEntityComponent instance.
+ * @returns {number} Rotation variant index.
+ */
+function resolveRotationVariant(staticComp) {
+    if (!staticComp) return 0;
+    if (typeof staticComp.getRotationVariant === "function") {
+        return staticComp.getRotationVariant() || 0;
+    }
+    return staticComp.rotationVariant || 0;
+}
+
+/**
+ * Resolves the building variant from a StaticMapEntityComponent instance.
+ * Supports both real shapez.io (`getVariant()`) and unit test mocks (`variant`).
+ *
+ * @param {any} staticComp - StaticMapEntityComponent instance.
+ * @returns {string} Variant string.
+ */
+function resolveVariant(staticComp) {
+    if (!staticComp) return "default";
+    if (typeof staticComp.getVariant === "function") {
+        return staticComp.getVariant() || "default";
+    }
+    return staticComp.variant || "default";
+}
+
+/**
  * Computes deterministic hashes for all occupied 16x16 grid regions in the world.
  *
  * @param {any} root - Active GameRoot instance.
@@ -60,10 +110,10 @@ function computeRegionHashes(root) {
         }
 
         const layer = entity.layer || "regular";
-        const code = staticComp.code || (staticComp.getBuilding && staticComp.getBuilding().getId()) || 0;
+        const code = staticComp.code || resolveBuildingId(staticComp) || 0;
         const rot = staticComp.rotation || 0;
-        const rotVar = staticComp.rotationVariant || 0;
-        const variant = staticComp.variant || "default";
+        const rotVar = resolveRotationVariant(staticComp);
+        const variant = resolveVariant(staticComp);
 
         let extra = "";
         if (entity.components.ConstantSignal) {
@@ -129,8 +179,7 @@ function serializeRegions(root, regionKeys) {
 
         if (!keySet.has(rKey)) continue;
 
-        const building = staticComp.getBuilding ? staticComp.getBuilding() : null;
-        const buildingId = building ? building.getId() : null;
+        const buildingId = resolveBuildingId(staticComp);
         if (!buildingId) continue;
 
         let signalCode = null;
@@ -149,8 +198,8 @@ function serializeRegions(root, regionKeys) {
             buildingId,
             rotation: staticComp.rotation || 0,
             originalRotation: staticComp.originalRotation || 0,
-            rotationVariant: staticComp.rotationVariant || 0,
-            variant: staticComp.variant || "default",
+            rotationVariant: resolveRotationVariant(staticComp),
+            variant: resolveVariant(staticComp),
             signalCode,
             leverToggled,
         });
@@ -173,56 +222,98 @@ function applyRegionData(mod, regions) {
     if (!mod.currentRoot || !Array.isArray(regions)) return;
     const root = mod.currentRoot;
 
+    const wasInside = mod.isInsidePlaceBuilding;
+    mod.isInsidePlaceBuilding = true;
     mod.isApplyingRemote = true;
-    try {
-        for (const reg of regions) {
-            const [rx, ry] = reg.key.split("_").map(Number);
-            const minX = rx * REGION_SIZE;
-            const maxX = minX + REGION_SIZE;
-            const minY = ry * REGION_SIZE;
-            const maxY = minY + REGION_SIZE;
 
-            // Remove all existing buildings in this 16x16 chunk
-            for (let x = minX; x < maxX; ++x) {
-                for (let y = minY; y < maxY; ++y) {
-                    for (const layer of ["regular", "wires"]) {
-                        const ent = root.map.getLayerContentXY(x, y, layer);
-                        if (ent) {
-                            root.logic.tryDeleteBuilding(ent);
-                        }
-                    }
-                }
-            }
-
-            // Place incoming authoritative entities
-            for (const item of reg.entities) {
-                const metaBuilding = shapez.gMetaBuildingRegistry.findById(item.buildingId);
-                if (metaBuilding) {
-                    const placed = root.logic.tryPlaceBuilding({
-                        origin: new shapez.Vector(item.x, item.y),
-                        rotation: item.rotation,
-                        originalRotation: item.originalRotation,
-                        rotationVariant: item.rotationVariant,
-                        variant: item.variant,
-                        building: metaBuilding,
-                    });
-
-                    if (placed) {
-                        if (item.signalCode !== null && placed.components && placed.components.ConstantSignal) {
-                            const editor = root.hud?.parts?.constantSignalEdit;
-                            if (editor && typeof editor.parseSignalCode === "function") {
-                                placed.components.ConstantSignal.signal = editor.parseSignalCode(placed, item.signalCode);
-                            }
-                        } else if (item.leverToggled !== null && placed.components && placed.components.Lever) {
-                            placed.components.Lever.toggled = Boolean(item.leverToggled);
-                        }
-                    }
-                }
-            }
+    const runBulk = fn => {
+        if (
+            root.logic &&
+            typeof root.logic.performBulkOperation === "function" &&
+            typeof root.logic.performImmutableOperation === "function"
+        ) {
+            return root.logic.performBulkOperation(() =>
+                root.logic.performImmutableOperation(fn)
+            );
+        } else if (root.logic && typeof root.logic.performBulkOperation === "function") {
+            return root.logic.performBulkOperation(fn);
+        } else {
+            return fn();
         }
+    };
+
+    try {
+        runBulk(() => {
+            for (const reg of regions) {
+                const [rx, ry] = reg.key.split("_").map(Number);
+                const minX = rx * REGION_SIZE;
+                const maxX = minX + REGION_SIZE;
+                const minY = ry * REGION_SIZE;
+                const maxY = minY + REGION_SIZE;
+
+                // Remove existing buildings whose origin falls inside this 16x16 chunk
+                for (let x = minX; x < maxX; ++x) {
+                    for (let y = minY; y < maxY; ++y) {
+                        for (const layer of ["regular", "wires"]) {
+                            const ent = root.map.getLayerContentXY(x, y, layer);
+                            if (ent) {
+                                const origin = ent.components?.StaticMapEntity?.origin;
+                                if (
+                                    !origin ||
+                                    (origin.x >= minX && origin.x < maxX && origin.y >= minY && origin.y < maxY)
+                                ) {
+                                    root.logic.tryDeleteBuilding(ent);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Place incoming authoritative entities
+                for (const item of reg.entities) {
+                    const metaBuilding = shapez.gMetaBuildingRegistry.findById(item.buildingId);
+                    if (metaBuilding) {
+                        const placed = root.logic.tryPlaceBuilding({
+                            origin: new shapez.Vector(item.x, item.y),
+                            rotation: item.rotation,
+                            originalRotation: item.originalRotation,
+                            rotationVariant: item.rotationVariant,
+                            variant: item.variant,
+                            building: metaBuilding,
+                        });
+
+                        if (placed) {
+                            if (
+                                item.signalCode !== null &&
+                                item.signalCode !== undefined &&
+                                placed.components &&
+                                placed.components.ConstantSignal
+                            ) {
+                                const editor = root.hud?.parts?.constantSignalEdit;
+                                if (editor && typeof editor.parseSignalCode === "function") {
+                                    placed.components.ConstantSignal.signal = editor.parseSignalCode(
+                                        placed,
+                                        item.signalCode
+                                    );
+                                }
+                            }
+                            if (
+                                item.leverToggled !== null &&
+                                item.leverToggled !== undefined &&
+                                placed.components &&
+                                placed.components.Lever
+                            ) {
+                                placed.components.Lever.toggled = Boolean(item.leverToggled);
+                            }
+                        }
+                    }
+                }
+            }
+        });
     } catch (err) {
         console.warn("[Steam MP] Error applying region repair data:", err);
     } finally {
+        mod.isInsidePlaceBuilding = wasInside;
         mod.isApplyingRemote = false;
     }
 }
@@ -280,10 +371,17 @@ function handleHostRequestRegionHashes(mod, peer) {
     for (const [k, v] of regionHashes) {
         hashesObj[k] = v;
     }
-    mod.sendRawToPeer(peer, {
-        type: "REGION_HASHES",
-        hashes: hashesObj,
-    });
+    if (typeof mod.sendChunkedToPeer === "function") {
+        mod.sendChunkedToPeer(peer, {
+            type: "REGION_HASHES",
+            hashes: hashesObj,
+        });
+    } else {
+        mod.sendRawToPeer(peer, {
+            type: "REGION_HASHES",
+            hashes: hashesObj,
+        });
+    }
 }
 
 /**
@@ -329,10 +427,17 @@ function handleClientRegionHashes(mod, msg) {
 function handleHostRequestRegions(mod, peer, msg) {
     if (mod.role !== "host" || !mod.currentRoot || !Array.isArray(msg.keys)) return;
     const regions = serializeRegions(mod.currentRoot, msg.keys);
-    mod.sendRawToPeer(peer, {
-        type: "REGION_DATA",
-        regions,
-    });
+    if (typeof mod.sendChunkedToPeer === "function") {
+        mod.sendChunkedToPeer(peer, {
+            type: "REGION_DATA",
+            regions,
+        });
+    } else {
+        mod.sendRawToPeer(peer, {
+            type: "REGION_DATA",
+            regions,
+        });
+    }
 }
 
 /**

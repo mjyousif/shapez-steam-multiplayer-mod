@@ -5,7 +5,7 @@
  * Provides:
  * 1. Full factory state serialization using shapez's `SavegameSerializer`.
  * 2. 48 KB chunk splitting (`CHUNK_PART`) to prevent network frame choking over P2P/TCP streams.
- * 3. Client-side chunk reassembly and progress tracking.
+ * 3. Bidirectional chunk reassembly and progress tracking.
  * 4. Savegame Isolation Guarantee:
  *    - Never overwrites or mutates singleplayer saves (`currentRoot.savegame`).
  *    - Explicitly allocates an isolated savegame slot (`activeCoopSavegame`) via `app.savegameMgr.createNewSavegame()`.
@@ -16,7 +16,7 @@
 const { PLAYER_COLORS } = require("../constants");
 
 /**
- * Maximum byte size of individual chunk slices during world dump transmission (48 Kilobytes).
+ * Maximum byte size of individual chunk slices during large message transmission (48 Kilobytes).
  * @type {number}
  */
 const CHUNK_SIZE_BYTES = 48000;
@@ -36,7 +36,7 @@ function serializeWorldDump(root) {
 }
 
 /**
- * Transmits a large message payload to a target peer broken into numbered chunks.
+ * Transmits a large message payload from the Host to a target peer broken into numbered chunks.
  *
  * @param {any} mod - Active Mod instance.
  * @param {any} peer - Target peer object.
@@ -55,6 +55,34 @@ function sendChunkedToPeer(mod, peer, message) {
     for (let i = 0; i < total; i++) {
         const slice = serialized.slice(i * CHUNK_SIZE_BYTES, (i + 1) * CHUNK_SIZE_BYTES);
         mod.sendRawToPeer(peer, {
+            type: "CHUNK_PART",
+            transferId,
+            index: i,
+            total,
+            data: slice,
+        });
+    }
+}
+
+/**
+ * Transmits a large message payload from a Client to the Host broken into numbered chunks.
+ *
+ * @param {any} mod - Active Mod instance.
+ * @param {any} message - Message payload to transmit.
+ */
+function sendChunkedToHost(mod, message) {
+    const serialized = JSON.stringify(message);
+    if (serialized.length <= CHUNK_SIZE_BYTES) {
+        mod.sendRawToHost(message);
+        return;
+    }
+
+    const transferId = "tx_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
+    const total = Math.ceil(serialized.length / CHUNK_SIZE_BYTES);
+
+    for (let i = 0; i < total; i++) {
+        const slice = serialized.slice(i * CHUNK_SIZE_BYTES, (i + 1) * CHUNK_SIZE_BYTES);
+        mod.sendRawToHost({
             type: "CHUNK_PART",
             transferId,
             index: i,
@@ -220,6 +248,7 @@ module.exports = {
     CHUNK_SIZE_BYTES,
     serializeWorldDump,
     sendChunkedToPeer,
+    sendChunkedToHost,
     handleChunkPart,
     sendWorldWelcomeToPeer,
     loadHostWorldDump,

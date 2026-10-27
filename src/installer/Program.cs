@@ -310,7 +310,7 @@ namespace ShapezCoopInstaller
                 }
             }
             catch { }
-            return "1.0.12";
+            return "1.0.16";
         }
 
         public static string GetInstalledModVersion()

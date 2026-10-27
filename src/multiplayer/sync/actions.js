@@ -11,6 +11,7 @@
  * - `ACT_UPGRADE`: Research tier unlock synchronizations.
  * - `ACT_WAYPOINTS`: Player map waypoint mutations.
  * - `ACT_PINS`: Pinned shape target HUD updates.
+ * - `ACT_BLUEPRINT`: Batched blueprint paste placements across regular and wires layers.
  * 
  * Reentrancy Invariant:
  * - All actions applied through `applyRemoteAction` MUST be wrapped in `isApplyingRemote = true`
@@ -34,6 +35,19 @@
  *   signalCode?: string,
  *   toggled?: boolean,
  *   tiles?: Array<{ x: number, y: number, layer: string }>,
+ *   entries?: Array<{
+ *     x: number,
+ *     y: number,
+ *     buildingId: string,
+ *     rotation: number,
+ *     originalRotation?: number,
+ *     rotationVariant: number,
+ *     variant: string,
+ *     layer: string,
+ *     signalCode?: string,
+ *     toggled?: boolean
+ *   }>,
+ *   cost?: number,
  *   upgradeId?: string,
  *   data?: any
  * }} msg - Remote action packet.
@@ -125,6 +139,94 @@ function applyRemoteAction(mod, msg) {
                 if (root.hud?.parts?.pinnedShapes && msg.data) {
                     root.hud.parts.pinnedShapes.deserialize(msg.data);
                     root.hud.parts.pinnedShapes.rerenderFull();
+                }
+                break;
+            }
+
+            case "ACT_BLUEPRINT": {
+                if (Array.isArray(msg.entries) && msg.entries.length > 0) {
+                    const wasInside = mod.isInsidePlaceBuilding;
+                    mod.isInsidePlaceBuilding = true;
+
+                    const runBulk = fn => {
+                        if (
+                            root.logic &&
+                            typeof root.logic.performBulkOperation === "function" &&
+                            typeof root.logic.performImmutableOperation === "function"
+                        ) {
+                            return root.logic.performBulkOperation(() =>
+                                root.logic.performImmutableOperation(fn)
+                            );
+                        } else if (
+                            root.logic &&
+                            typeof root.logic.performBulkOperation === "function"
+                        ) {
+                            return root.logic.performBulkOperation(fn);
+                        } else {
+                            return fn();
+                        }
+                    };
+
+                    try {
+                        runBulk(() => {
+                            for (const b of msg.entries) {
+                                const metaBuilding = shapez.gMetaBuildingRegistry.findById(b.buildingId);
+                                if (!metaBuilding) continue;
+
+                                const entity = metaBuilding.createEntity({
+                                    root,
+                                    origin: new shapez.Vector(b.x, b.y),
+                                    rotation: b.rotation,
+                                    originalRotation: b.originalRotation,
+                                    rotationVariant: b.rotationVariant,
+                                    variant: b.variant,
+                                });
+
+                                if (b.signalCode && entity.components?.ConstantSignal) {
+                                    const editor = root.hud?.parts?.constantSignalEdit;
+                                    if (editor && typeof editor.parseSignalCode === "function") {
+                                        entity.components.ConstantSignal.signal = editor.parseSignalCode(
+                                            entity,
+                                            b.signalCode
+                                        );
+                                    }
+                                }
+                                if (typeof b.toggled === "boolean" && entity.components?.Lever) {
+                                    entity.components.Lever.toggled = b.toggled;
+                                }
+
+                                if (root.logic.checkCanPlaceEntity(entity, {})) {
+                                    root.logic.freeEntityAreaBeforeBuild(entity);
+                                    root.map.placeStaticEntity(entity);
+                                    root.entityMgr.registerEntity(entity);
+                                }
+                            }
+                        });
+                    } finally {
+                        mod.isInsidePlaceBuilding = wasInside;
+                    }
+
+                    // On Host: deduct blueprint shape cost if applicable and broadcast authoritative hub state
+                    if (
+                        mod.role === "host" &&
+                        msg.cost > 0 &&
+                        root.gameMode &&
+                        typeof root.gameMode.getHasFreeCopyPaste === "function" &&
+                        !root.gameMode.getHasFreeCopyPaste() &&
+                        root.hubGoals
+                    ) {
+                        if (
+                            typeof root.hubGoals.takeShapeByKey === "function" &&
+                            typeof root.gameMode.getBlueprintShapeKey === "function"
+                        ) {
+                            const key = root.gameMode.getBlueprintShapeKey();
+                            root.hubGoals.takeShapeByKey(key, msg.cost);
+                            if (root.hubGoals.storedShapes && root.hubGoals.storedShapes[key] < 0) {
+                                root.hubGoals.storedShapes[key] = 0;
+                            }
+                            mod.broadcastHubSync(root);
+                        }
+                    }
                 }
                 break;
             }

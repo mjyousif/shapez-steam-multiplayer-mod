@@ -14,6 +14,8 @@
  * 6. `HubGoals.tryUnlockUpgrade`: Captures research tier purchases and broadcasts `ACT_UPGRADE`.
  * 7. `HUDWaypoints`: Synchronizes waypoint creations, renames, and deletions via `ACT_WAYPOINTS`.
  * 8. `HUDPinnedShapes`: Synchronizes pinned shapes via `ACT_PINS`.
+ * 9. `Blueprint.tryPlace`: Intercepts blueprint pastes, sets `isInsidePlaceBuilding = true`
+ *    to prevent false deletions, captures placed entities, and broadcasts `ACT_BLUEPRINT`.
  * 
  * Invariants:
  * - Never broadcast actions when `isApplyingRemote === true` (loop prevention).
@@ -30,7 +32,7 @@ const hubSync = require("./hub_sync");
 function setupGameHooks(mod) {
     if (!mod.modInterface) return;
 
-    // 1. Hook Building / Belt / Wire / Blueprint Placement
+    // 1. Hook Building / Belt / Wire / Toolbar Placement
     mod.modInterface.replaceMethod(shapez.GameLogic, "tryPlaceBuilding", function (original, [args]) {
         const wasInside = mod.isInsidePlaceBuilding;
         mod.isInsidePlaceBuilding = true;
@@ -203,7 +205,7 @@ function setupGameHooks(mod) {
         );
     }
 
-    // 7. Hook Waypoints
+    // 8. Hook Waypoints
     if (shapez.HUDWaypoints) {
         for (const fnName of ["addWaypoint", "renameWaypoint", "deleteWaypoint"]) {
             mod.modInterface.runAfterMethod(shapez.HUDWaypoints, fnName, function () {
@@ -217,7 +219,7 @@ function setupGameHooks(mod) {
         }
     }
 
-    // 8. Hook Pinned Shapes
+    // 9. Hook Pinned Shapes
     if (shapez.HUDPinnedShapes) {
         for (const fnName of ["pinNewShape", "unpinShape"]) {
             mod.modInterface.runAfterMethod(shapez.HUDPinnedShapes, fnName, function () {
@@ -229,6 +231,97 @@ function setupGameHooks(mod) {
                 }
             });
         }
+    }
+
+    // 10. Hook Blueprint Placement
+    if (shapez.Blueprint) {
+        mod.modInterface.replaceMethod(shapez.Blueprint, "tryPlace", function (original, [root, targetTile]) {
+            if (mod.isApplyingRemote || !mod.isSessionActive() || !root || !root.entityMgr) {
+                return original(root, targetTile);
+            }
+
+            const wasInside = mod.isInsidePlaceBuilding;
+            mod.isInsidePlaceBuilding = true;
+            const placedEntities = [];
+            const originalRegisterEntity = root.entityMgr.registerEntity;
+            root.entityMgr.registerEntity = function (entity) {
+                placedEntities.push(entity);
+                return originalRegisterEntity.call(this, entity);
+            };
+
+            let success = false;
+            try {
+                success = original(root, targetTile);
+            } finally {
+                root.entityMgr.registerEntity = originalRegisterEntity;
+                mod.isInsidePlaceBuilding = wasInside;
+            }
+
+            if (success && placedEntities.length > 0 && !mod.isApplyingRemote && mod.isSessionActive()) {
+                const entries = [];
+                for (const entity of placedEntities) {
+                    if (!entity || entity.destroyed) continue;
+                    const staticComp = entity.components?.StaticMapEntity;
+                    if (!staticComp) continue;
+                    const metaBuilding =
+                        (typeof staticComp.getMetaBuilding === "function" && staticComp.getMetaBuilding()) ||
+                        (typeof staticComp.getBuilding === "function" && staticComp.getBuilding()) ||
+                        null;
+                    if (!metaBuilding) continue;
+
+                    let signalCode = null;
+                    if (entity.components?.ConstantSignal?.signal) {
+                        signalCode = entity.components.ConstantSignal.signal.getAsCopyableKey();
+                    }
+
+                    let toggled = false;
+                    if (entity.components?.Lever) {
+                        toggled = Boolean(entity.components.Lever.toggled);
+                    }
+
+                    const rotationVariant =
+                        typeof staticComp.getRotationVariant === "function"
+                            ? staticComp.getRotationVariant()
+                            : staticComp.rotationVariant || 0;
+                    const variant =
+                        typeof staticComp.getVariant === "function"
+                            ? staticComp.getVariant()
+                            : staticComp.variant || "default";
+
+                    entries.push({
+                        x: staticComp.origin.x,
+                        y: staticComp.origin.y,
+                        buildingId: metaBuilding.getId(),
+                        rotation: staticComp.rotation,
+                        originalRotation: staticComp.originalRotation,
+                        rotationVariant,
+                        variant,
+                        layer: entity.layer || "regular",
+                        signalCode,
+                        toggled,
+                    });
+                }
+
+                if (entries.length > 0) {
+                    const cost = typeof this.getCost === "function" ? this.getCost() : 0;
+                    mod.dispatchNetworkAction({
+                        type: "ACT_BLUEPRINT",
+                        entries,
+                        cost,
+                    });
+
+                    if (mod.role === "host" && cost > 0) {
+                        setTimeout(() => {
+                            if (mod.isSessionActive() && mod.currentRoot) {
+                                hubSync.broadcastHubSync(mod, mod.currentRoot);
+                            }
+                        }, 0);
+                    }
+                }
+            }
+
+            return success;
+        });
     }
 }
 

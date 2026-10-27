@@ -61,11 +61,12 @@ The automated pipeline executes three distinct stages:
 1. **`npm run check:syntax` (`scripts/check-syntax.js`)**:
    * Validates static AST syntax on all JavaScript files using Node's `vm.Script`.
 2. **`npm run test:unit` (`node --test`)**:
-   * Executes 60+ unit tests across 11 test suites under `tests/`:
+   * Executes 60+ unit tests across 12 test suites under `tests/`:
      * `asar-patcher.test.js`: Pickle headers, binary offsets, unpacked native flags.
      * `framing.test.js`: 4-byte BE TCP framing and packet fragmentation.
      * `join-code.test.js`: Base64 Join Code parsing, fallback formats, HTML escaping.
      * `network-resilience.test.js`: Malformed frames, buffer resilience, port auto-increment, and chaos testing (latency, jitter, packet loss).
+     * `blueprint-sync.test.js`: Intercepts `Blueprint.tryPlace`, suppresses replacement deletions, validates batch entity replication, and verifies host cost deduction.
      * `savegame-isolation.test.js`: Verifies client savegame safety.
      * `installer-cli.test.js`: Smoke tests CLI flags (`--help`, `--version`, `--backup`, `--check-update`).
      * `dist-package.test.js`: Distribution package structure.
