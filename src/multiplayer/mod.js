@@ -764,11 +764,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (this.role !== "host") return;
         for (const [peerId, peer] of this.peers) {
             if (peerId === excludePeerId) continue;
-            this.sendRawToPeer(peer, message);
+            this.sendChunkedToPeer(peer, message);
         }
     }
 
-    sendToHost(message) {
+    sendRawToHost(message) {
         if (this.role !== "client") return;
         if (this.clientTransport === "tcp") {
             ipcRenderer.invoke("mp:net:client-send", { message });
@@ -778,6 +778,11 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
                 data: { kind: "STEAM_PACKET", packet: message },
             });
         }
+    }
+
+    sendToHost(message) {
+        if (this.role !== "client") return;
+        worldDump.sendChunkedToHost(this, message);
     }
 
     dispatchNetworkAction(actionMsg) {
@@ -819,6 +824,13 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
         if (!msg || !msg.type) return;
         const peer = this.peers.get(peerId);
         if (!peer) return;
+
+        if (msg.type === "CHUNK_PART") {
+            worldDump.handleChunkPart(this, msg, fullMsg => {
+                this.onHostReceivedPeerMessage(peerId, fullMsg);
+            });
+            return;
+        }
 
         switch (msg.type) {
             case "HELLO": {
@@ -948,7 +960,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             case "ACT_LEVER":
             case "ACT_CLEAR_BELTS":
             case "ACT_WAYPOINTS":
-            case "ACT_PINS": {
+            case "ACT_PINS":
+            case "ACT_BLUEPRINT": {
                 this.actionSeq = (this.actionSeq || 0) + 1;
                 msg.actionSeq = this.actionSeq;
                 this.applyRemoteAction(msg);
@@ -1056,7 +1069,8 @@ class Mod extends (typeof shapez !== "undefined" && shapez.Mod ? shapez.Mod : cl
             case "ACT_LEVER":
             case "ACT_CLEAR_BELTS":
             case "ACT_WAYPOINTS":
-            case "ACT_PINS": {
+            case "ACT_PINS":
+            case "ACT_BLUEPRINT": {
                 this.applyRemoteAction(msg);
                 break;
             }

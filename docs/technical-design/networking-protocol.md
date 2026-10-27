@@ -113,7 +113,7 @@ To avoid requiring full Visual Studio C++ toolchains on end-user machines, the n
 
 #### Dual Channel Architecture
 The native P2P transport allocates two dedicated channels:
-* **Channel 0 — Reliable Ordered (`k_EP2PSendReliable = 2`)**: Used for gameplay actions (`ACT_PLACE`, `ACT_DELETE`), world dumps (`WELCOME_WORLD`, `CHUNK_PART`), and hub state sync (`SYNC_HUB`). Retransmits dropped packets automatically and supports payloads up to 1 MB.
+* **Channel 0 — Reliable Ordered (`k_EP2PSendReliable = 2`)**: Used for gameplay actions (`ACT_PLACE`, `ACT_DELETE`, `ACT_BLUEPRINT`), world dumps (`WELCOME_WORLD`, `CHUNK_PART`), and hub state sync (`SYNC_HUB`). Retransmits dropped packets automatically and supports payloads up to 1 MB.
 * **Channel 1 — Unreliable Low-Latency (`k_EP2PSendUnreliable = 0`)**: Used for remote cursor streaming (`CURSOR`). Dropped packets are ignored in favor of newer updates, avoiding head-of-line blocking.
 
 Incoming packets on both channels are drained every 15ms via an unref'd timer (`drainP2PChannel(0)`, `drainP2PChannel(1)`).
@@ -128,41 +128,17 @@ If native P2P is unavailable (such as in headless CI environments without `steam
 
 ---
 
-## 3. Chunked World Transfer Protocol
+## 3. Bidirectional Chunked Transfer Protocol
 
-A shapez.io factory savegame dump can range from 200 KB to over 10 MB depending on factory complexity. Transmitting large monolithic strings in a single message can saturate network buffers.
+A shapez.io factory savegame dump (`WELCOME_WORLD`), large blueprint paste (`ACT_BLUEPRINT`), or multi-region repair payload (`REGION_DATA`) can range from 50 KB to over 10 MB depending on factory complexity. Transmitting large monolithic strings in a single message can saturate network buffers.
 
-To ensure smooth delivery without frame drops, `sendChunkedToPeer()` splits the payload into **48 KB slices**:
+To ensure smooth delivery without frame drops in both directions (`Host -> Client` and `Client -> Host`), `sendChunkedToPeer()` and `sendChunkedToHost()` automatically split any payload exceeding **48 KB** (`CHUNK_SIZE_BYTES = 48000`) into numbered `CHUNK_PART` frames.
 
-```javascript
-// src/multiplayer/sync/world_dump.js
-sendChunkedToPeer(peer, message) {
-    const raw = JSON.stringify(message);
-    const CHUNK_SIZE = 49152; // 48 KB
-    if (raw.length <= CHUNK_SIZE) {
-        this.sendRawToPeer(peer, message);
-        return;
-    }
-    const transferId = "xfer_" + Math.random().toString(36).slice(2, 10);
-    const total = Math.ceil(raw.length / CHUNK_SIZE);
-    for (let i = 0; i < total; i++) {
-        const chunk = raw.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-        this.sendRawToPeer(peer, {
-            type: "CHUNK_PART",
-            transferId,
-            index: i,
-            total,
-            data: chunk,
-        });
-    }
-}
-```
-
-### Client-Side Chunk Reassembly
-The client stores received slices inside `clientChunkBuffer`. Once all slices (`received >= total`) arrive:
+### Chunk Reassembly (`handleChunkPart`)
+Both the Host (`onHostReceivedPeerMessage`) and Client (`onClientReceivedMessage`) buffer received slices inside `clientChunkBuffer`. Once all slices (`received >= total`) arrive:
 1. Slices are concatenated in order: `entry.chunks.join("")`.
 2. The full payload is deserialized: `JSON.parse(fullJson)`.
-3. The message is passed into `onClientReceivedMessage(fullMsg)` as if it were received as a single message.
+3. The reconstructed message is dispatched into the respective message handler (`onHostReceivedPeerMessage` or `onClientReceivedMessage`) as if it arrived in a single frame.
 
 ---
 
@@ -195,6 +171,7 @@ All messages dispatched between Host and Clients share a common `type` property:
 | `ACT_SIGNAL` | Both directions | Constant signal code modified | `x`, `y`, `layer`, `signalCode`, `actionSeq` |
 | `ACT_LEVER` | Both directions | Logic lever toggled | `x`, `y`, `toggled`, `actionSeq` |
 | `ACT_CLEAR_BELTS` | Both directions | Mass selector cleared items from belts | `tiles: [{ x, y, layer }]`, `actionSeq` |
+| `ACT_BLUEPRINT` | Both directions | Batched blueprint paste placements | `entries: [{ x, y, buildingId, rotation, originalRotation, rotationVariant, variant, layer, signalCode, toggled }]`, `cost`, `actionSeq` |
 | `REQUEST_UPGRADE` | Client &rarr; Host | Client requests tech tree upgrade unlock | `upgradeId` |
 | `SYNC_HUB` | Host &rarr; Client | Authoritative hub level, throughput & upgrade sync | `level`, `deliveredShapes`, `upgradeLevels`, `seq`, `ackReq` |
 | `SYNC_CHECK` | Host &rarr; Client | Periodic FNV-1a world checksum broadcast | `rootHash`, `actionSeq` |

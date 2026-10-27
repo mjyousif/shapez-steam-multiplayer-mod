@@ -1,6 +1,6 @@
 {
     "name": "shapez-steam-multiplayer-mod",
-    "version": "1.0.12",
+    "version": "1.0.16",
     "description": "Steam-integrated Co-op Multiplayer Mod and IPC Bridge for shapez.io (v1.5.7)",
     "repository": {
         "type": "git",

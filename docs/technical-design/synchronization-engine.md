@@ -44,7 +44,7 @@ flowchart TD
 The mod hooks into core game subsystems during initialization (`setupGameHooks()`) using the official `shapez.ModInterface` extension API.
 
 ### 2.1 Building & Belt Placement (`shapez.GameLogic.tryPlaceBuilding`)
-When a player clicks to place a single building, drags a belt/wire line, or pastes a blueprint:
+When a player clicks to place a single building or drags a belt/wire line:
 ```javascript
 this.modInterface.replaceMethod(shapez.GameLogic, "tryPlaceBuilding", function (original, [args]) {
     const wasInside = self.isInsidePlaceBuilding;
@@ -97,6 +97,17 @@ this.modInterface.replaceMethod(shapez.GameLogic, "tryDeleteBuilding", function 
 });
 ```
 
+
+### 2.4 Blueprint Placement Synchronization (`shapez.Blueprint.tryPlace` & `ACT_BLUEPRINT`)
+In vanilla shapez.io, blueprint pasting does **not** call `GameLogic.tryPlaceBuilding`. Instead, `Blueprint.prototype.tryPlace` directly clones blueprint entities, deletes replaceable buildings via `freeEntityAreaBeforeBuild`, and registers new entities directly into the spatial map (`map.placeStaticEntity`) and entity manager (`entityMgr.registerEntity`) inside a bulk operation wrapper (`performBulkOperation` + `performImmutableOperation`).
+
+To achieve real-time synchronization without requiring full savegame resynchronization:
+1. **Hook & Entity Capture**: `setupGameHooks()` intercepts `shapez.Blueprint.prototype.tryPlace`. It sets `isInsidePlaceBuilding = true` to prevent `freeEntityAreaBeforeBuild` from triggering false `ACT_DELETE` packets when placing over existing replaceable structures.
+2. **Atomic Registration Tracking**: During `tryPlace`, the hook temporarily intercepts `root.entityMgr.registerEntity` to capture the exact list of entities successfully placed.
+3. **Payload Dispatch**: Serializes placed coordinates, meta-building IDs, rotation parameters, variants, layer (`regular` vs `wires`), constant signal keys (`ConstantSignal`), and lever toggles (`Lever`), broadcasting as `ACT_BLUEPRINT`.
+4. **Remote Execution**: Peers replicate the batch within `performBulkOperation` and `performImmutableOperation`, triggering native belt connection recalculations and wire network graph rebuilds with zero frame drops.
+5. **Host-Authoritative Shape Deduction**: If copy/paste is not free, the Host deducts the blueprint shape cost from `hubGoals.storedShapes` and broadcasts the updated total via `SYNC_HUB`.
+
 ### 2.3 Logic Gate & Wire Synchronization
 The mod synchronizes the advanced Wires DLC components:
 * **Constant Signals (`shapez.HUDConstantSignalEdit`)**: When a player configures a constant signal (value, shape, boolean, or color), the updated signal code is extracted via `signal.getAsCopyableKey()` and broadcast as `ACT_SIGNAL`.
@@ -127,7 +138,7 @@ When Player A places a belt:
    * Interceptors check `if (!this.isApplyingRemote)` before broadcasting any network packet.
 2. **`isInsidePlaceBuilding`**:
    * In shapez.io, placing a building over an existing building automatically deletes the previous building first.
-   * The `isInsidePlaceBuilding` flag prevents the intermediate deletion from generating a spurious `ACT_DELETE` packet.
+   * The `isInsidePlaceBuilding` flag prevents the intermediate deletion from generating a spurious `ACT_DELETE` packet during single building placement and blueprint pastes.
 
 ---
 
@@ -237,5 +248,5 @@ For each region, `computeRegionHashes()` iterates over constituent chunks in sor
 1. **Lightweight Checksum Heartbeat (`SYNC_CHECK`)**: Every 3000ms, the Host broadcasts `{ type: "SYNC_CHECK", rootHash, actionSeq }`.
 2. **In-Flight Action Grace Period**: If the client's local root hash does not match, the mod checks whether actions are currently in flight (`lastAppliedActionSeq < actionSeq`). Discrepancies within a 6000ms grace window are ignored to avoid false alarms while players are actively placing buildings.
 3. **Escalation & Region Query (`REQUEST_REGION_HASHES`)**: If a discrepancy persists beyond the grace period over consecutive checks, the client queries the Host for regional hashes via `{ type: "REQUEST_REGION_HASHES" }`.
-4. **Targeted Region Repair (`REQUEST_REGIONS` / `REGION_DATA`)**: The client compares region hashes, isolates only the differing region keys (typically just 1 or 2 regions), and requests their chunk data via `{ type: "REQUEST_REGIONS", regions }`.
-5. **Non-Disruptive Patching (`applyRegionData`)**: The Host extracts and sends the exact entities in those regions via `REGION_DATA`. The client surgically deletes and reconstructs only the affected chunks—healing the desync instantly without reloading the factory or disrupting other players.
+4. **Targeted Region Repair (`REQUEST_REGIONS` / `REGION_DATA`)**: The client compares region hashes, isolates only the differing region keys (typically just 1 or 2 regions), and requests their chunk data via `{ type: "REQUEST_REGIONS", keys }`.
+5. **Non-Disruptive Patching (`applyRegionData`)**: The Host extracts the exact entities in those regions via `serializeRegions()` (resolving `getMetaBuilding()`, `getRotationVariant()`, and `getVariant()` on `StaticMapEntityComponent`) and transmits `REGION_DATA`. The client wraps the repair in `performBulkOperation` and `isInsidePlaceBuilding = true`, removes only existing entities whose origin anchors inside the target 16x16 region (preserving multi-tile buildings anchored in adjacent regions), and reconstructs the authoritative entities—healing any drift without reloading the factory.

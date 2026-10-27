@@ -20,7 +20,7 @@ const METADATA = {
     website: "https://store.steampowered.com/app/1318690/shapez/",
     author: "Antigravity",
     name: "Steam Multiplayer (Co-op)",
-    version: "1.0.12",
+    version: "1.0.16",
     id: "steam-multiplayer",
     description:
         "Real-time Co-op Multiplayer with Steamworks Lobbies, Friends, Overlay, WebRTC/TCP P2P, Live Cursors, and Full Factory Sync.",

@@ -24,7 +24,7 @@ Deep-dives into the mod's architecture, underlying protocols, and game engine ho
 
 * [**Synchronization Engine**](technical-design/synchronization-engine.md)
   * `shapez.ModInterface` method interception.
-  * Delta action catalog (`ACT_PLACE`, `ACT_DELETE`, `ACT_SIGNAL`, etc.).
+  * Delta action catalog (`ACT_PLACE`, `ACT_DELETE`, `ACT_SIGNAL`, `ACT_BLUEPRINT`, etc.).
   * Recursion & echo-loop prevention (`isApplyingRemote`).
   * Host-authoritative hub goals, optimistic upgrade prediction, and geometric multiplier recalculation.
   * Background FNV-1a world checksums and targeted spatial region self-healing.

@@ -24,9 +24,9 @@ describe("World Checksum and Region Self-Healing Repair", () => {
                         origin: { x, y },
                         code,
                         rotation: rot,
-                        rotationVariant: 0,
-                        variant: "default",
-                        getBuilding: () => ({ getId: () => code }),
+                        getRotationVariant: () => 0,
+                        getVariant: () => "default",
+                        getMetaBuilding: () => ({ getId: () => code }),
                     },
                     ConstantSignal: signal ? { signal: { getAsCopyableKey: () => signal } } : null,
                     Lever: lever !== null ? { toggled: lever } : null,
@@ -93,7 +93,7 @@ describe("World Checksum and Region Self-Healing Repair", () => {
         assert.notStrictEqual(rootHashA, rootHashD, "Signal change must alter root hash");
     });
 
-    test("serializeRegions and applyRegionData extract and replace regional factory chunks", () => {
+    test("serializeRegions and applyRegionData extract and replace regional factory chunks using getMetaBuilding", () => {
         const deleted = [];
         const placed = [];
 
@@ -114,9 +114,26 @@ describe("World Checksum and Region Self-Healing Repair", () => {
             components: {
                 StaticMapEntity: {
                     origin: { x: 2, y: 3 },
-                    code: "old_belt",
+                    code: 10,
                     rotation: 0,
-                    getBuilding: () => ({ getId: () => "old_belt" }),
+                    getMetaBuilding: () => ({ getId: () => "old_belt" }),
+                    getRotationVariant: () => 0,
+                    getVariant: () => "default",
+                },
+            },
+        };
+
+        // Multi-tile entity anchored in adjacent region (-1_0 at x = -1) whose bounding box extends into (0, 3)
+        const neighborMultiTileEntity = {
+            layer: "regular",
+            components: {
+                StaticMapEntity: {
+                    origin: { x: -1, y: 3 },
+                    code: 11,
+                    rotation: 0,
+                    getMetaBuilding: () => ({ getId: () => "balancer" }),
+                    getRotationVariant: () => 0,
+                    getVariant: () => "default",
                 },
             },
         };
@@ -124,11 +141,14 @@ describe("World Checksum and Region Self-Healing Repair", () => {
         const mockClientRoot = {
             map: {
                 getLayerContentXY: (x, y, layer) => {
+                    if (x === 0 && y === 3 && layer === "regular") return neighborMultiTileEntity;
                     if (x === 2 && y === 3 && layer === "regular") return existingEntity;
                     return null;
                 },
             },
             logic: {
+                performBulkOperation: fn => fn(),
+                performImmutableOperation: fn => fn(),
                 tryDeleteBuilding: ent => deleted.push(ent),
                 tryPlaceBuilding: args => {
                     placed.push(args);
@@ -140,6 +160,7 @@ describe("World Checksum and Region Self-Healing Repair", () => {
         const mockMod = {
             currentRoot: mockClientRoot,
             isApplyingRemote: false,
+            isInsidePlaceBuilding: false,
         };
 
         const hostRoot = {
@@ -150,12 +171,12 @@ describe("World Checksum and Region Self-Healing Repair", () => {
                         components: {
                             StaticMapEntity: {
                                 origin: { x: 2, y: 3 },
-                                code: "new_miner",
+                                code: 22,
                                 rotation: 2,
                                 originalRotation: 2,
-                                rotationVariant: 0,
-                                variant: "default",
-                                getBuilding: () => ({ getId: () => "new_miner" }),
+                                getRotationVariant: () => 1,
+                                getVariant: () => "chain",
+                                getMetaBuilding: () => ({ getId: () => "new_miner" }),
                             },
                         },
                     },
@@ -166,18 +187,24 @@ describe("World Checksum and Region Self-Healing Repair", () => {
         const serialized = worldCheck.serializeRegions(hostRoot, ["0_0"]);
         assert.strictEqual(serialized.length, 1);
         assert.strictEqual(serialized[0].key, "0_0");
+        assert.strictEqual(serialized[0].entities.length, 1);
         assert.strictEqual(serialized[0].entities[0].buildingId, "new_miner");
+        assert.strictEqual(serialized[0].entities[0].rotationVariant, 1);
+        assert.strictEqual(serialized[0].entities[0].variant, "chain");
 
         // Apply to client
         worldCheck.applyRegionData(mockMod, serialized);
 
-        assert.strictEqual(deleted.length, 1, "Existing entity in chunk must be deleted first");
-        assert.strictEqual(deleted[0], existingEntity);
+        assert.strictEqual(deleted.length, 1, "Only entities anchored inside chunk 0_0 must be deleted");
+        assert.strictEqual(deleted[0], existingEntity, "Neighbor multi-tile entity anchored at x=-1 must not be severed");
         assert.strictEqual(placed.length, 1, "Authoritative entity must be placed");
         assert.strictEqual(placed[0].building.id, "new_miner");
         assert.strictEqual(placed[0].origin.x, 2);
         assert.strictEqual(placed[0].origin.y, 3);
+        assert.strictEqual(placed[0].rotationVariant, 1);
+        assert.strictEqual(placed[0].variant, "chain");
         assert.strictEqual(mockMod.isApplyingRemote, false, "isApplyingRemote flag must be cleared");
+        assert.strictEqual(mockMod.isInsidePlaceBuilding, false, "isInsidePlaceBuilding flag must be cleared");
     });
 
     test("handleClientSyncCheck respects action grace periods and handles consecutive mismatches", () => {
