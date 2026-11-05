@@ -114,6 +114,11 @@ const MULTIPLAYER_CSS = `
 
             /* Modal Backdrop & Card */
             .mpModalBackdrop {
+                pointer-events: all !important;
+            }
+            .mpModalBackdrop,
+            .mpModalBackdrop * {
+                pointer-events: all !important;
                 position: fixed;
                 inset: 0;
                 background: rgba(10, 15, 25, 0.78);
@@ -122,7 +127,14 @@ const MULTIPLAYER_CSS = `
                 align-items: center;
                 justify-content: center;
                 font-family: GameFont, sans-serif;
+                cursor: grab;
+                user-select: none;
+                -webkit-user-select: none;
+                pointer-events: all !important;
             }
+            .mpInviteBanner,
+            .mpInviteBanner * {
+                pointer-events: all !important;
             .mpModalCard {
                 width: min(${D(860)}, 92vw);
                 max-height: 88vh;
@@ -136,6 +148,7 @@ const MULTIPLAYER_CSS = `
                 border-radius: ${D(8)};
                 padding: ${D(18)} ${D(22)};
                 box-shadow: 0 ${D(20)} ${D(50)} rgba(0, 0, 0, 0.7);
+                position: relative;
             }
 
             /* Normalize shapez's global .styledButton inside multiplayer modals and overlays */
@@ -166,6 +179,9 @@ const MULTIPLAYER_CSS = `
                 border-bottom: 1px solid rgba(102, 192, 244, 0.25);
                 padding-bottom: ${D(10)};
                 margin-bottom: ${D(12)};
+                cursor: grab;
+                user-select: none;
+                -webkit-user-select: none;
             }
             .mpModalHeader h2 {
                 margin: 0 0 ${D(6)} 0;
@@ -445,7 +461,11 @@ const MULTIPLAYER_CSS = `
                 color: #f3f4f6;
                 font-family: GameFont, sans-serif;
                 z-index: 900;
-                pointer-events: all;
+                pointer-events: all !important;
+            }
+            #ingame_HUD_Multiplayer.mpHudPanel,
+            #ingame_HUD_Multiplayer.mpHudPanel * {
+                pointer-events: all !important;
                 box-shadow: 0 ${D(8)} ${D(24)} rgba(0, 0, 0, 0.55);
                 backdrop-filter: blur(4px);
                 -webkit-backdrop-filter: blur(4px);
@@ -468,10 +488,20 @@ const MULTIPLAYER_CSS = `
                 border-radius: ${D(6)} ${D(6)} 0 0;
                 font-size: ${D(12)};
                 font-weight: bold;
-                cursor: move;
+                cursor: grab;
                 user-select: none;
                 -webkit-user-select: none;
                 flex: 0 0 auto;
+            }
+            .mpGripHandle {
+                color: #64748b;
+                font-size: ${D(13)};
+                line-height: 1;
+                margin-right: -2px;
+                cursor: grab;
+                user-select: none;
+                -webkit-user-select: none;
+                flex-shrink: 0;
             }
             .mpStatusDot {
                 width: ${D(8)};
@@ -677,6 +707,14 @@ const MULTIPLAYER_CSS = `
                 cursor: pointer !important;
             }
 
+            /* Dragging State Cursor & Interaction Guard */
+            .mpDragging,
+            .mpDragging * {
+                cursor: grabbing !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+            }
+
             /* Dedicated Clean Scrollbars inside HUD Panel & Modals */
             .mpHudPanel ::-webkit-scrollbar,
             .mpModalCard ::-webkit-scrollbar,
@@ -721,7 +759,7 @@ const MULTIPLAYER_CSS = `
                 font-size: ${D(13)};
                 z-index: 100000;
                 opacity: 0;
-                pointer-events: none;
+                pointer-events: none !important;
                 transition: all 0.2s ease;
             }
             .mpToastNotification.visible {
@@ -766,7 +804,11 @@ const MULTIPLAYER_CSS = `
                 justify-content: center;
                 font-family: GameFont, sans-serif;
                 backdrop-filter: blur(4px);
+                pointer-events: all !important;
             }
+            .mpJoinOverlayBackdrop,
+            .mpJoinOverlayBackdrop * {
+                pointer-events: all !important;
             .mpJoinCard {
                 width: min(${D(440)}, 90vw);
                 background: #1b2838;
@@ -781,6 +823,10 @@ const MULTIPLAYER_CSS = `
                 gap: ${D(12)};
                 color: #e5e7eb;
                 box-sizing: border-box;
+                cursor: grab;
+                user-select: none;
+                -webkit-user-select: none;
+                position: relative;
             }
             .mpJoinSpinner {
                 width: ${D(38)};
