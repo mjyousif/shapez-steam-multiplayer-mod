@@ -21,6 +21,7 @@
 
 const { METADATA } = require("../constants");
 const { escapeHtml } = require("../join_code");
+const { makeDraggable } = require("./draggable");
 
 /**
  * Injects the "Steam Multiplayer" button and savegame "Co-op" buttons into the Main Menu.
@@ -292,8 +293,13 @@ async function openMultiplayerModal(mod, mainMenuState = null) {
     mod.modalEl = overlay;
 
     const modalCard = overlay.querySelector(".mpModalCard");
+    const modalHeader = overlay.querySelector(".mpModalHeader");
     if (modalCard) {
         modalCard.addEventListener("mousedown", ev => ev.stopPropagation());
+        mod.modalDragCleanup = makeDraggable(modalCard, {
+            handle: modalHeader,
+            allowBackgroundDrag: true,
+        });
     }
     overlay.addEventListener("wheel", ev => ev.stopPropagation(), { passive: true });
 
@@ -412,6 +418,10 @@ async function openMultiplayerModal(mod, mainMenuState = null) {
  * @param {any} mod - Active Mod instance.
  */
 function closeMultiplayerModal(mod) {
+    if (mod.modalDragCleanup) {
+        mod.modalDragCleanup();
+        mod.modalDragCleanup = null;
+    }
     if (mod.modalEl) {
         mod.modalEl.remove();
         mod.modalEl = null;
@@ -460,7 +470,18 @@ async function openLogsModal(mod) {
     `;
 
     document.body.appendChild(modal);
-    const close = () => modal.remove();
+
+    const modalCard = modal.querySelector(".mpModalCard");
+    const modalHeader = modal.querySelector(".mpModalHeader");
+    const logsDragCleanup = makeDraggable(modalCard, {
+        handle: modalHeader,
+        allowBackgroundDrag: true,
+    });
+
+    const close = () => {
+        if (logsDragCleanup) logsDragCleanup();
+        modal.remove();
+    };
     const pre = modal.querySelector("pre");
     if (pre) {
         pre.addEventListener(
@@ -512,6 +533,7 @@ function showJoinProgressModal(mod, initialStatus = "Connecting to Host...") {
     const card = overlay.querySelector ? overlay.querySelector(".mpJoinCard") : null;
     if (card && typeof card.addEventListener === "function") {
         card.addEventListener("mousedown", ev => ev.stopPropagation());
+        mod.joinProgressDragCleanup = makeDraggable(card, { allowBackgroundDrag: true });
     }
 
     const cancelBtn = overlay.querySelector ? overlay.querySelector(".mpCancelJoinBtn") : null;
@@ -557,6 +579,10 @@ function updateJoinProgressModal(mod, statusText, progressPercent = null) {
  * @param {any} mod - Active Mod instance.
  */
 function closeJoinProgressModal(mod) {
+    if (mod.joinProgressDragCleanup) {
+        mod.joinProgressDragCleanup();
+        mod.joinProgressDragCleanup = null;
+    }
     if (mod.joinOverlayEl) {
         try {
             if (typeof mod.joinOverlayEl.remove === "function") {
@@ -603,6 +629,8 @@ function showInviteToast(mod, { fromName, fromSteamId, lobbyId, joinCode }) {
         </div>
     `;
     document.body.appendChild(banner);
+
+    makeDraggable(banner, { allowBackgroundDrag: true });
 
     banner.querySelector(".mpAcceptInviteBtn").addEventListener("click", () => {
         banner.remove();

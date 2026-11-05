@@ -7,7 +7,7 @@
  * - `escapeHtml`, `encodeJoinCode`, `decodeJoinCode` (`join_code.js`)
  * - `HUDMultiplayer` (`hud/hud_multiplayer.js`)
  * - `Mod` (`mod.js`)
- * - Subsystems: `worldDump`, `actions`, `hubSync`, `cursors`, `gameHooks`, `dialogs`, `styles`.
+ * - Subsystems: `worldDump`, `actions`, `hubSync`, `cursors`, `gameHooks`, `dialogs`, `styles`, `draggable`.
  */
 
 const { METADATA, PLAYER_COLORS } = require("./constants");
@@ -22,6 +22,7 @@ const cursors = require("./sync/cursors");
 const gameHooks = require("./sync/game_hooks");
 const dialogs = require("./ui/dialogs");
 const styles = require("./ui/styles");
+const draggable = require("./ui/draggable");
 
 module.exports = {
     METADATA,
@@ -39,4 +40,6 @@ module.exports = {
     gameHooks,
     dialogs,
     styles,
+    draggable,
+    makeDraggable: draggable.makeDraggable,
 };

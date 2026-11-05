@@ -11,11 +11,12 @@
  * 6. High-frequency tick updates for cursor broadcasting and canvas overlay rendering.
  * 
  * Invariants:
- * - Prevents DOM event propagation (clicks, wheel scrolling) from triggering underlying game canvas panning/zooming.
- * - Safely detaches keyboard listeners (`P` for ping) upon scene teardown / game exit.
+ * - Prevents DOM event propagation (clicks, wheel scrolling, drag mousedown) from triggering underlying game canvas panning/zooming.
+ * - Safely detaches keyboard listeners (`P` for ping) and dragging listeners upon scene teardown / game exit.
  */
 
 const { escapeHtml } = require("../join_code");
+const { makeDraggable } = require("../ui/draggable");
 
 /**
  * In-game HUD element managing the multiplayer status, roster, and cooperative chat.
@@ -33,6 +34,7 @@ class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPar
             ["mpHudPanel"],
             `
             <div class="mpHudHeader">
+                <span class="mpGripHandle" title="Drag to move panel">⠿</span>
                 <div class="mpStatusDot"></div>
                 <span class="mpHeaderTitle">Steam Co-op</span>
                 <span class="mpPlayerCountBadge">1</span>
@@ -65,6 +67,7 @@ class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPar
         this.mod = window.$shapezMultiplayerMod;
         this.collapsed = false;
         this.lastCursorBroadcast = 0;
+        this.dragCleanup = null;
 
         if (this.mod) {
             this.mod.attachGameRoot(this.root, this);
@@ -82,12 +85,10 @@ class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPar
         const chatInput = this.container.querySelector(".mpChatInput");
         const chatSendBtn = this.container.querySelector(".mpChatSendBtn");
 
-        // Prevent mouse clicks in the HUD body from bubbling to canvas panning
-        if (body) {
-            body.addEventListener("mousedown", ev => {
-                ev.stopPropagation();
-            });
-        }
+        // Prevent mouse clicks on the HUD container from bubbling to canvas panning
+        this.container.addEventListener("mousedown", ev => {
+            ev.stopPropagation();
+        });
 
         // Enable smooth wheel scrolling without zooming the underlying game map
         const makeScrollable = el => {
@@ -113,43 +114,18 @@ class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPar
             { passive: false }
         );
 
-        // Allow dragging HUD panel anywhere on screen
-        if (header) {
-            let isDragging = false;
-            let startX = 0, startY = 0;
-            let startLeft = 0, startTop = 0;
-
-            header.style.cursor = "move";
-            header.addEventListener("mousedown", ev => {
-                if (ev.target === collapseBtn) return;
-                isDragging = true;
-                startX = ev.clientX;
-                startY = ev.clientY;
-                const rect = this.container.getBoundingClientRect();
-                startLeft = rect.left;
-                startTop = rect.top;
-                this.container.style.right = "auto";
-                this.container.style.bottom = "auto";
-                this.container.style.left = startLeft + "px";
-                this.container.style.top = startTop + "px";
-                this.container.style.transform = "none";
-                ev.preventDefault();
-            });
-
-            window.addEventListener("mousemove", ev => {
-                if (!isDragging) return;
-                const dx = ev.clientX - startX;
-                const dy = ev.clientY - startY;
-                const newLeft = Math.max(10, Math.min(window.innerWidth - 120, startLeft + dx));
-                const newTop = Math.max(10, Math.min(window.innerHeight - 40, startTop + dy));
-                this.container.style.left = newLeft + "px";
-                this.container.style.top = newTop + "px";
-            });
-
-            window.addEventListener("mouseup", () => {
-                isDragging = false;
-            });
-        }
+        // Attach smooth draggable behavior (persisting position across reloads)
+        this.dragCleanup = makeDraggable(this.container, {
+            handle: header,
+            allowBackgroundDrag: true,
+            constrainMaxHeight: true,
+            initialPosition: this.mod?.hudPosition || null,
+            onPositionChange: pos => {
+                if (this.mod) {
+                    this.mod.hudPosition = pos;
+                }
+            },
+        });
 
         collapseBtn.addEventListener("click", () => {
             this.collapsed = !this.collapsed;
@@ -213,6 +189,10 @@ class HUDMultiplayer extends (typeof shapez !== "undefined" && shapez.BaseHUDPar
      * Cleans up registered global event handlers and detaches the game root.
      */
     cleanup() {
+        if (this.dragCleanup) {
+            this.dragCleanup();
+            this.dragCleanup = null;
+        }
         if (this.keyDownHandler) {
             window.removeEventListener("keydown", this.keyDownHandler);
             this.keyDownHandler = null;

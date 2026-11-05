@@ -94,6 +94,8 @@ Powered by Node.js's native test runner (`node --test`), covering 70+ test asser
    * Validates rotated tile-space bounding boxes for multi-tile machines, layer isolation, and blueprint caching.
 13. **`tests/ui-styles.test.js`**:
    * Validates dynamic --ui-scale CSS calculations, .styledButton scoping in modals, flex wrapping, and height alignment.
+14. **`tests/draggable-ui.test.js`**:
+    * Validates in-game HUD panel and modal dragging, event propagation isolation (canvas camera safety), interactive control exclusion, viewport boundary clamping, dynamic maxHeight adjustment, and coordinate persistence across world resyncs.
 
 ### 2.3 End-to-End Simulation (`scripts/verify-mod.js`)
 * Spawns two isolated simulated processes (Host and Client).

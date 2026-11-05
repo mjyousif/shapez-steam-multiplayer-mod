@@ -8,10 +8,14 @@ Building massive factories in Co-op requires constant coordination and communica
 
 ## 2. In-Game HUD Panel
 
-The Co-op HUD is embedded at the top-center of the screen during gameplay (`HUDMultiplayer` in `src/multiplayer/hud/hud_multiplayer.js`).
+The Co-op HUD is embedded at the top-right of the screen during gameplay (`HUDMultiplayer` in `src/multiplayer/hud/hud_multiplayer.js`).
 
 ### HUD Components & Layout
-* **Draggable Header Bar**: Players can click and drag the HUD header anywhere on the screen to avoid obscuring Hub deliveries, pinned goals, or hotbar selections.
+* **Draggable Grip Handle (`⠿`) & Panel**: Players can click and drag the HUD header (or panel frame) anywhere on the screen to avoid obscuring Hub deliveries, pinned goals, or hotbar selections.
+  * **Event Isolation**: Event propagation (`stopPropagation`) is enforced on mouse and pointer interactions so dragging or clicking the HUD never pans the game camera or clicks factory buildings underneath.
+  * **Persistent Position**: The chosen HUD position is automatically preserved across in-game world resyncs and save reloads.
+  * **Adaptive Viewport Clamping**: Clamps within screen boundaries on window resize and dynamically adjusts `max-height` to prevent overflowing off the bottom of the display.
+  * **Draggable Modals & Banners**: The central Steam Multiplayer dialog, Diagnostic Logs viewer, Invite Banner, and Progress Overlay also support smooth dragging.
 * **Status Indicator**:
   * 🟢 **Green**: Connected to active Host / Clients.
   * 🟡 **Yellow**: Connecting / Handshaking / Synchronizing world state.
@@ -65,19 +69,3 @@ On an infinite shapez.io canvas, players frequently work thousands of tiles apar
 * Messages are rendered with colored author tags matching each player's cursor color.
 * Chat messages support smooth auto-scrolling to the latest entry.
 * System notifications (e.g., player joins, leaves, and factory resync events) appear automatically in the chat stream.
-
----
-
-## 6. Dynamic UI Scaling & Layout Protection
-
-### 6.1 Proportional Scaling via `--ui-scale`
-* shapez.io dynamically computes screen density and user UI scale preferences, exposing them via the CSS custom property `--ui-scale`.
-* All mod UI components (`src/multiplayer/ui/styles.js`) use the `D(px)` helper (`calc(${px}px * var(--ui-scale, 1))`) instead of unscaled fixed pixel sizes.
-* This ensures that modal cards, in-game HUDs, fonts, padding, and dialog elements scale uniformly across 1080p, 1440p, and 4K displays.
-
-### 6.2 Button Normalization & Overflow Prevention
-* **Global `.styledButton` Normalization**: Vanilla shapez applies large, uppercase button styles that inherit dynamic padding and sizing. Inside modal cards (`.mpModalCard`), banners (`.mpInviteBanner`), and loading screens (`.mpJoinCard`), the mod scopes and normalizes `.styledButton` properties (`font-size`, `padding`, `line-height`, `white-space: nowrap`) to prevent oversized buttons from breaking modal layouts.
-* **Header & Row Flex Wrapping**: Action headers (such as `3. Steam Friends` with **Logs** and **Steam Overlay** buttons) utilize `flex-wrap: wrap` and `min-width: 0` to prevent horizontal clipping.
-* **Text Truncation**: Player names in friends lists apply `text-overflow: ellipsis` and `min-width: 0` flex constraints so long Steam usernames do not push action buttons out of view.
-* **Component Height Alignment**: Form inputs and adjacent action triggers (such as the Join Code input and the **Connect** button) share synchronized dynamic heights (`calc(34px * var(--ui-scale, 1))`).
-
