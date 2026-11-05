@@ -65,3 +65,19 @@ On an infinite shapez.io canvas, players frequently work thousands of tiles apar
 * Messages are rendered with colored author tags matching each player's cursor color.
 * Chat messages support smooth auto-scrolling to the latest entry.
 * System notifications (e.g., player joins, leaves, and factory resync events) appear automatically in the chat stream.
+
+---
+
+## 6. Dynamic UI Scaling & Layout Protection
+
+### 6.1 Proportional Scaling via `--ui-scale`
+* shapez.io dynamically computes screen density and user UI scale preferences, exposing them via the CSS custom property `--ui-scale`.
+* All mod UI components (`src/multiplayer/ui/styles.js`) use the `D(px)` helper (`calc(${px}px * var(--ui-scale, 1))`) instead of unscaled fixed pixel sizes.
+* This ensures that modal cards, in-game HUDs, fonts, padding, and dialog elements scale uniformly across 1080p, 1440p, and 4K displays.
+
+### 6.2 Button Normalization & Overflow Prevention
+* **Global `.styledButton` Normalization**: Vanilla shapez applies large, uppercase button styles that inherit dynamic padding and sizing. Inside modal cards (`.mpModalCard`), banners (`.mpInviteBanner`), and loading screens (`.mpJoinCard`), the mod scopes and normalizes `.styledButton` properties (`font-size`, `padding`, `line-height`, `white-space: nowrap`) to prevent oversized buttons from breaking modal layouts.
+* **Header & Row Flex Wrapping**: Action headers (such as `3. Steam Friends` with **Logs** and **Steam Overlay** buttons) utilize `flex-wrap: wrap` and `min-width: 0` to prevent horizontal clipping.
+* **Text Truncation**: Player names in friends lists apply `text-overflow: ellipsis` and `min-width: 0` flex constraints so long Steam usernames do not push action buttons out of view.
+* **Component Height Alignment**: Form inputs and adjacent action triggers (such as the Join Code input and the **Connect** button) share synchronized dynamic heights (`calc(34px * var(--ui-scale, 1))`).
+

@@ -51,7 +51,7 @@ npm run test:e2e        # Runs the end-to-end Host <-> Client simulation
 Performs static AST syntax verification on all project scripts, source files, and test files using Node's native `vm.Script` compiler.
 
 ### 2.2 Unit Test Suites (`tests/*.test.js`)
-Powered by Node.js's native test runner (`node --test`), covering 60+ test assertions across 12 specialized suites:
+Powered by Node.js's native test runner (`node --test`), covering 70+ test assertions across 13 specialized suites:
 1. **`tests/asar-patcher.test.js`**:
    * Inspects `app.asar` byte offsets, Chromium Pickle headers, and JSON structure.
    * Confirms `index.js`, `steam.js`, and `preload.js` patch cleanly in-place.
@@ -88,10 +88,12 @@ Powered by Node.js's native test runner (`node --test`), covering 60+ test asser
    * Validates host-authoritative snapshots, geometric speed multiplier recomputation (`recomputeUpgradeImprovements`), client optimistic prediction reconciliation, and prediction timeout expiry.
    * **Mutation Twin**: Detects un-reconciled client state mutations; asserts that host authority rolls back mutated upgrade tiers and recomputes multipliers while dropping forged/stale sequence packets.
 11. **`tests/world-check.test.js`**:
-    * Tests deterministic FNV-1a hashing, 16x16 chunk spatial bucketing, regional factory chunk replacement, and drift detection grace periods with targeted auto-repair.
-    * **Mutation Twin**: Verifies that silent client-side factory mutations (e.g. rotation discrepancies) alter the root hash and isolate to the specific region; validates that bypassing repair forces full resync escalation (eliminating hollow passes) and that auto-repair restores 100% hash equivalence.
+   * Tests deterministic FNV-1a hashing, 16x16 chunk spatial bucketing, regional factory chunk replacement, and drift detection grace periods with targeted auto-repair.
+   * **Mutation Twin**: Verifies that silent client-side factory mutations (e.g. rotation discrepancies) alter the root hash and isolate to the specific region; validates that bypassing repair forces full resync escalation (eliminating hollow passes) and that auto-repair restores 100% hash equivalence.
 12. **`tests/ghost-preview.test.js`**:
-    * Validates ghost building preview rendering, rotation variants, multi-tile dimensions, and canvas context transformation calls.
+   * Validates rotated tile-space bounding boxes for multi-tile machines, layer isolation, and blueprint caching.
+13. **`tests/ui-styles.test.js`**:
+   * Validates dynamic --ui-scale CSS calculations, .styledButton scoping in modals, flex wrapping, and height alignment.
 
 ### 2.3 End-to-End Simulation (`scripts/verify-mod.js`)
 * Spawns two isolated simulated processes (Host and Client).

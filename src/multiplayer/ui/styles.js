@@ -1,7 +1,17 @@
 /**
  * @file src/multiplayer/ui/styles.js
  * @description Injected CSS styling for in-game multiplayer HUD, modals, dialogs, and toasts.
+ * Uses dynamic scaling via shapez.io's --ui-scale CSS property to ensure proportional rendering
+ * across all monitor resolutions and UI scaling preferences.
  */
+
+/**
+ * Scales a pixel value dynamically according to shapez.io's --ui-scale CSS custom property.
+ * Defaults to 1 if --ui-scale is not set or running outside the game environment.
+ * @param {number} px
+ * @returns {string}
+ */
+const D = px => `calc(${px}px * var(--ui-scale, 1))`;
 
 const MULTIPLAYER_CSS = `
             .mpMainMenuBtn {
@@ -11,36 +21,36 @@ const MULTIPLAYER_CSS = `
                 display: flex !important;
                 align-items: center;
                 justify-content: center;
-                gap: 8px;
-                margin-bottom: 8px !important;
+                gap: ${D(8)};
+                margin-bottom: ${D(8)} !important;
             }
             .mpMainMenuBtn:hover {
                 background: linear-gradient(135deg, #2a475e 0%, #3b6584 100%) !important;
                 color: #ffffff !important;
             }
             .mpSteamDot {
-                width: 9px;
-                height: 9px;
+                width: ${D(9)};
+                height: ${D(9)};
                 border-radius: 50%;
                 background: #9ca3af;
                 display: inline-block;
             }
             .mpSteamDot.online {
                 background: #4ade80;
-                box-shadow: 0 0 8px #4ade80;
+                box-shadow: 0 0 ${D(8)} #4ade80;
             }
             .mpSteamDot.warning {
                 background: #f59e0b;
-                box-shadow: 0 0 8px #f59e0b;
+                box-shadow: 0 0 ${D(8)} #f59e0b;
             }
             .mpBridgeWarning {
                 background: rgba(239, 68, 68, 0.12);
                 border: 1px solid rgba(239, 68, 68, 0.4);
-                border-radius: 8px;
-                padding: 10px 14px;
-                margin-bottom: 14px;
+                border-radius: ${D(8)};
+                padding: ${D(10)} ${D(14)};
+                margin-bottom: ${D(14)};
                 color: #fca5a5;
-                font-size: 12px;
+                font-size: ${D(12)};
                 line-height: 1.5;
             }
             .mpBridgeWarning strong {
@@ -50,41 +60,41 @@ const MULTIPLAYER_CSS = `
                 background: #f59e0b !important;
                 color: #0f172a !important;
                 font-weight: 700 !important;
-                font-size: 10px !important;
+                font-size: ${D(10)} !important;
                 line-height: 1 !important;
-                padding: 3px 7px !important;
-                border-radius: 10px !important;
-                margin-left: 6px !important;
+                padding: ${D(3)} ${D(7)} !important;
+                border-radius: ${D(10)} !important;
+                margin-left: ${D(6)} !important;
                 letter-spacing: 0.3px !important;
             }
             .mpUpdateModalBanner {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 12px;
+                gap: ${D(12)};
                 background: rgba(245, 158, 11, 0.12);
                 border: 1px solid rgba(245, 158, 11, 0.4);
-                border-radius: 8px;
-                padding: 10px 14px;
-                margin-bottom: 14px;
+                border-radius: ${D(8)};
+                padding: ${D(10)} ${D(14)};
+                margin-bottom: ${D(14)};
             }
             .mpUpdateModalText {
-                font-size: 12px;
+                font-size: ${D(12)};
                 color: #fef3c7;
                 line-height: 1.4;
             }
             .mpUpdateModalSub {
-                font-size: 11px;
+                font-size: ${D(11)};
                 color: #cbd5e1;
-                margin-top: 3px;
+                margin-top: ${D(3)};
             }
             .mpOpenUpdateBtn {
                 background: #f59e0b !important;
                 color: #0f172a !important;
                 font-weight: 700 !important;
-                font-size: 11px !important;
-                padding: 6px 14px !important;
-                border-radius: 4px !important;
+                font-size: ${D(11)} !important;
+                padding: ${D(6)} ${D(14)} !important;
+                border-radius: ${D(4)} !important;
                 white-space: nowrap !important;
                 cursor: pointer !important;
                 flex-shrink: 0 !important;
@@ -96,9 +106,10 @@ const MULTIPLAYER_CSS = `
             .mpHostSaveBtn {
                 background: #1e3a8a !important;
                 color: #93c5fd !important;
-                font-size: 11px !important;
-                padding: 3px 8px !important;
-                margin-left: 4px !important;
+                font-size: ${D(11)} !important;
+                padding: ${D(3)} ${D(8)} !important;
+                margin-left: ${D(4)} !important;
+                border-radius: ${D(4)} !important;
             }
 
             /* Modal Backdrop & Card */
@@ -113,43 +124,66 @@ const MULTIPLAYER_CSS = `
                 font-family: GameFont, sans-serif;
             }
             .mpModalCard {
-                width: min(860px, 92vw);
-                max-height: 86vh;
-                overflow-y: auto;
-                overflow-x: hidden;
+                width: min(${D(860)}, 92vw);
+                max-height: 88vh;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
                 box-sizing: border-box;
                 background: #1b2838;
                 color: #e5e7eb;
                 border: 2px solid #66c0f4;
-                border-radius: 8px;
-                padding: 20px 24px;
-                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+                border-radius: ${D(8)};
+                padding: ${D(18)} ${D(22)};
+                box-shadow: 0 ${D(20)} ${D(50)} rgba(0, 0, 0, 0.7);
             }
+
+            /* Normalize shapez's global .styledButton inside multiplayer modals and overlays */
+            .mpModalCard .styledButton,
+            .mpInviteBanner .styledButton,
+            .mpJoinCard .styledButton {
+                font-size: ${D(12)} !important;
+                line-height: ${D(16)} !important;
+                padding: ${D(6)} ${D(12)} !important;
+                margin: 0 !important;
+                white-space: nowrap !important;
+                box-sizing: border-box !important;
+                border-radius: ${D(4)} !important;
+                letter-spacing: 0.3px !important;
+            }
+            .mpModalCard .mpPrimaryBtn.mpStartHostBtn {
+                font-size: ${D(13)} !important;
+                padding: ${D(8)} ${D(14)} !important;
+                white-space: normal !important;
+                line-height: 1.3 !important;
+            }
+
             .mpModalHeader {
+                flex: 0 0 auto;
                 display: flex;
                 align-items: flex-start;
                 justify-content: space-between;
                 border-bottom: 1px solid rgba(102, 192, 244, 0.25);
-                padding-bottom: 12px;
-                margin-bottom: 16px;
+                padding-bottom: ${D(10)};
+                margin-bottom: ${D(12)};
             }
             .mpModalHeader h2 {
-                margin: 0 0 6px 0;
+                margin: 0 0 ${D(6)} 0;
                 color: #ffffff;
-                font-size: 20px;
+                font-size: ${D(20)};
             }
             .mpSubHeader {
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                font-size: 12px;
+                gap: ${D(10)};
+                font-size: ${D(12)};
                 color: #9ca3af;
             }
             .mpBadge {
-                padding: 2px 8px;
-                border-radius: 4px;
+                padding: ${D(2)} ${D(8)};
+                border-radius: ${D(4)};
                 font-weight: bold;
-                font-size: 11px;
+                font-size: ${D(11)};
             }
             .mpBadge.steamOnline {
                 background: rgba(74, 222, 128, 0.18);
@@ -165,7 +199,7 @@ const MULTIPLAYER_CSS = `
                 background: transparent;
                 border: none;
                 color: #9ca3af;
-                font-size: 26px;
+                font-size: ${D(24)};
                 cursor: pointer;
                 line-height: 1;
             }
@@ -173,59 +207,65 @@ const MULTIPLAYER_CSS = `
                 color: #ffffff;
             }
             .mpActiveSessionBanner {
+                flex: 0 0 auto;
                 background: rgba(16, 185, 129, 0.15);
                 border: 1px solid #10b981;
-                border-radius: 6px;
-                padding: 10px 14px;
-                margin-bottom: 16px;
+                border-radius: ${D(6)};
+                padding: ${D(10)} ${D(14)};
+                margin-bottom: ${D(12)};
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 12px;
+                gap: ${D(12)};
             }
             .mpJoinCodePreview {
-                font-size: 12px;
+                font-size: ${D(12)};
                 color: #a7f3d0;
-                margin-top: 3px;
+                margin-top: ${D(3)};
             }
             .mpBannerActions {
                 display: flex;
-                gap: 8px;
+                gap: ${D(8)};
                 flex-wrap: wrap;
             }
             .mpModalColumns {
+                flex: 1 1 auto;
+                min-height: 0;
                 display: grid;
                 grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-                gap: 20px;
+                gap: ${D(16)};
                 min-width: 0;
                 width: 100%;
                 box-sizing: border-box;
+                overflow: hidden;
             }
             .mpModalCol {
                 background: rgba(15, 23, 42, 0.55);
                 border: 1px solid rgba(148, 163, 184, 0.2);
-                border-radius: 6px;
-                padding: 14px;
+                border-radius: ${D(6)};
+                padding: ${D(12)};
                 display: flex;
                 flex-direction: column;
-                gap: 8px;
+                gap: ${D(8)};
                 min-width: 0;
+                min-height: 0;
                 box-sizing: border-box;
             }
             .mpModalCol h3 {
                 margin: 0;
-                font-size: 15px;
+                font-size: ${D(15)};
                 color: #66c0f4;
             }
             .mpColDesc {
                 margin: 0;
-                font-size: 12px;
+                font-size: ${D(12)};
                 color: #94a3b8;
+                flex: 0 0 auto;
             }
             .mpFieldLabel {
-                font-size: 12px;
+                font-size: ${D(12)};
                 color: #cbd5e1;
-                margin-top: 4px;
+                margin-top: ${D(4)};
             }
             .mpSelectSave,
             .mpInputPort,
@@ -234,12 +274,12 @@ const MULTIPLAYER_CSS = `
                 background-color: #0f172a !important;
                 color: #f8fafc !important;
                 border: 1px solid #334155 !important;
-                border-radius: 4px !important;
-                padding: 6px 10px !important;
+                border-radius: ${D(4)} !important;
+                padding: ${D(6)} ${D(10)} !important;
                 margin: 0 !important;
-                height: 34px !important;
-                line-height: 20px !important;
-                font-size: 12px !important;
+                height: ${D(34)} !important;
+                line-height: ${D(20)} !important;
+                font-size: ${D(12)} !important;
                 font-family: inherit !important;
                 display: block !important;
                 box-sizing: border-box !important;
@@ -249,7 +289,7 @@ const MULTIPLAYER_CSS = `
             }
             .mpInputGroup {
                 display: flex !important;
-                gap: 8px !important;
+                gap: ${D(8)} !important;
                 align-items: center !important;
                 width: 100% !important;
                 box-sizing: border-box !important;
@@ -261,10 +301,11 @@ const MULTIPLAYER_CSS = `
             }
             .mpInputGroup .mpJoinByCodeBtn {
                 flex: 0 0 auto !important;
-                height: 34px !important;
-                line-height: 20px !important;
+                height: ${D(34)} !important;
+                line-height: ${D(20)} !important;
                 margin: 0 !important;
-                padding: 0 16px !important;
+                padding: 0 ${D(16)} !important;
+                font-size: ${D(12)} !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
@@ -272,7 +313,7 @@ const MULTIPLAYER_CSS = `
             .mpPrimaryBtn {
                 background: #2563eb !important;
                 color: #ffffff !important;
-                padding: 8px 14px !important;
+                padding: ${D(8)} ${D(14)} !important;
             }
             .mpPrimaryBtn:hover {
                 background: #3b82f6 !important;
@@ -280,20 +321,42 @@ const MULTIPLAYER_CSS = `
             .mpDivider {
                 border: none;
                 border-top: 1px solid rgba(148, 163, 184, 0.2);
-                margin: 10px 0;
+                margin: ${D(10)} 0;
             }
             .mpFriendsHeader {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 8px;
+                gap: ${D(8)};
+                flex-wrap: wrap;
+                min-width: 0;
+                flex: 0 0 auto;
+            }
+            .mpFriendsHeader h3 {
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+            .mpFriendsHeader .mpFriendBtns {
+                display: flex;
+                gap: ${D(6)};
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }
+            .mpFriendsHeader .styledButton {
+                font-size: ${D(11)} !important;
+                padding: ${D(4)} ${D(8)} !important;
+                height: ${D(26)} !important;
+                line-height: ${D(18)} !important;
             }
             .mpFriendsList {
+                flex: 1 1 auto;
+                min-height: 0;
+                max-height: calc(340px * var(--ui-scale, 1));
                 display: flex;
                 flex-direction: column;
-                gap: 6px;
-                max-height: 270px;
+                gap: ${D(6)};
                 overflow-y: auto;
+                padding-right: 2px;
             }
             .mpFriendRow {
                 display: flex;
@@ -301,8 +364,9 @@ const MULTIPLAYER_CSS = `
                 justify-content: space-between;
                 background: rgba(30, 41, 59, 0.75);
                 border: 1px solid rgba(100, 116, 139, 0.3);
-                border-radius: 5px;
-                padding: 7px 10px;
+                border-radius: ${D(5)};
+                padding: ${D(7)} ${D(10)};
+                gap: ${D(8)};
             }
             .mpFriendRow.hosting {
                 border-color: #4ade80;
@@ -311,10 +375,17 @@ const MULTIPLAYER_CSS = `
             .mpFriendInfo {
                 display: flex;
                 flex-direction: column;
-                font-size: 12px;
+                font-size: ${D(12)};
+                min-width: 0;
+                flex: 1 1 auto;
+            }
+            .mpFriendInfo strong {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .mpFriendSub {
-                font-size: 11px;
+                font-size: ${D(11)};
                 color: #94a3b8;
             }
             .mpFriendRow.hosting .mpFriendSub {
@@ -322,33 +393,60 @@ const MULTIPLAYER_CSS = `
             }
             .mpFriendBtns {
                 display: flex;
-                gap: 6px;
+                gap: ${D(6)};
+                flex-shrink: 0;
+            }
+            .mpFriendBtns .styledButton {
+                font-size: ${D(11)} !important;
+                padding: ${D(4)} ${D(10)} !important;
+                height: ${D(26)} !important;
+                line-height: ${D(18)} !important;
             }
             .mpEmptyFriends {
-                font-size: 12px;
+                font-size: ${D(12)};
                 color: #94a3b8;
-                padding: 12px;
+                padding: ${D(12)};
                 background: rgba(15, 23, 42, 0.4);
-                border-radius: 4px;
+                border-radius: ${D(4)};
+            }
+
+            /* Diagnostic Logs Modal */
+            .mpLogsModalBackdrop pre {
+                background: #0f172a !important;
+                color: #e2e8f0 !important;
+                padding: ${D(12)} !important;
+                border-radius: ${D(6)} !important;
+                max-height: ${D(360)} !important;
+                overflow: auto !important;
+                font-size: ${D(11)} !important;
+                line-height: 1.45 !important;
+                user-select: text !important;
+                -webkit-user-select: text !important;
+            }
+            .mpLogsActions {
+                display: flex;
+                gap: ${D(8)};
+                justify-content: flex-end;
+                margin-top: ${D(12)};
             }
 
             /* In-Game HUD Panel */
             #ingame_HUD_Multiplayer.mpHudPanel {
                 position: absolute;
-                top: 70px;
-                right: 16px;
-                width: 290px;
-                max-height: calc(100vh - 90px);
+                top: ${D(70)};
+                right: ${D(16)};
+                width: ${D(290)};
+                max-height: calc(100vh - ${D(90)});
                 display: flex;
                 flex-direction: column;
                 background: rgba(15, 23, 42, 0.95);
                 border: 1.5px solid rgba(102, 192, 244, 0.65);
-                border-radius: 8px;
+                border-radius: ${D(8)};
                 color: #f3f4f6;
                 font-family: GameFont, sans-serif;
                 z-index: 900;
                 pointer-events: all;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+                box-shadow: 0 ${D(8)} ${D(24)} rgba(0, 0, 0, 0.55);
                 backdrop-filter: blur(4px);
                 -webkit-backdrop-filter: blur(4px);
                 box-sizing: border-box;
@@ -363,12 +461,12 @@ const MULTIPLAYER_CSS = `
             .mpHudHeader {
                 display: flex;
                 align-items: center;
-                gap: 8px;
-                padding: 7px 10px;
+                gap: ${D(8)};
+                padding: ${D(7)} ${D(10)};
                 background: rgba(30, 41, 59, 0.95);
                 border-bottom: 1px solid rgba(102, 192, 244, 0.25);
-                border-radius: 6px 6px 0 0;
-                font-size: 12px;
+                border-radius: ${D(6)} ${D(6)} 0 0;
+                font-size: ${D(12)};
                 font-weight: bold;
                 cursor: move;
                 user-select: none;
@@ -376,15 +474,15 @@ const MULTIPLAYER_CSS = `
                 flex: 0 0 auto;
             }
             .mpStatusDot {
-                width: 8px;
-                height: 8px;
+                width: ${D(8)};
+                height: ${D(8)};
                 border-radius: 50%;
                 background: #9ca3af;
                 flex-shrink: 0;
             }
             .mpStatusDot.online {
                 background: #4ade80;
-                box-shadow: 0 0 6px #4ade80;
+                box-shadow: 0 0 ${D(6)} #4ade80;
             }
             .mpHeaderTitle {
                 flex: 1;
@@ -396,9 +494,9 @@ const MULTIPLAYER_CSS = `
             .mpPlayerCountBadge {
                 background: #2563eb;
                 color: #ffffff;
-                border-radius: 10px;
-                padding: 1px 7px;
-                font-size: 11px;
+                border-radius: ${D(10)};
+                padding: ${D(1)} ${D(7)};
+                font-size: ${D(11)};
                 flex-shrink: 0;
             }
             .mpCollapseBtn {
@@ -406,19 +504,19 @@ const MULTIPLAYER_CSS = `
                 border: none;
                 color: #cbd5e1;
                 cursor: pointer;
-                font-size: 14px;
+                font-size: ${D(14)};
                 font-weight: bold;
-                padding: 0 4px;
+                padding: 0 ${D(4)};
                 line-height: 1;
             }
             .mpCollapseBtn:hover {
                 color: #ffffff;
             }
             .mpHudBody {
-                padding: 8px 10px;
+                padding: ${D(8)} ${D(10)};
                 display: flex;
                 flex-direction: column;
-                gap: 8px;
+                gap: ${D(8)};
                 overflow-y: auto;
                 overflow-x: hidden;
                 box-sizing: border-box;
@@ -428,29 +526,29 @@ const MULTIPLAYER_CSS = `
             .mpRoster {
                 display: flex;
                 flex-direction: column;
-                gap: 4px;
-                max-height: 90px;
+                gap: ${D(4)};
+                max-height: ${D(90)};
                 overflow-y: auto;
                 overflow-x: hidden;
                 box-sizing: border-box;
-                padding-right: 2px;
+                padding-right: ${D(2)};
                 flex-shrink: 0;
             }
             .mpRosterItem {
                 display: flex;
                 align-items: center;
-                gap: 8px;
-                font-size: 11px;
+                gap: ${D(8)};
+                font-size: ${D(11)};
                 background: rgba(30, 41, 59, 0.75);
                 border: 1px solid rgba(100, 116, 139, 0.25);
-                padding: 4px 8px;
-                border-radius: 4px;
+                padding: ${D(4)} ${D(8)};
+                border-radius: ${D(4)};
                 box-sizing: border-box;
-                min-height: 25px;
+                min-height: ${D(25)};
             }
             .mpColorSwatch {
-                width: 9px;
-                height: 9px;
+                width: ${D(9)};
+                height: ${D(9)};
                 border-radius: 50%;
                 flex-shrink: 0;
             }
@@ -459,14 +557,14 @@ const MULTIPLAYER_CSS = `
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                font-size: 11px;
+                font-size: ${D(11)};
             }
             .mpRosterRole {
-                font-size: 9px;
+                font-size: ${D(9)};
                 color: #93c5fd;
                 background: rgba(37, 99, 235, 0.3);
-                padding: 1px 5px;
-                border-radius: 3px;
+                padding: ${D(1)} ${D(5)};
+                border-radius: ${D(3)};
                 font-weight: 600;
                 letter-spacing: 0.5px;
                 flex-shrink: 0;
@@ -474,19 +572,19 @@ const MULTIPLAYER_CSS = `
             .mpActionRow {
                 display: grid !important;
                 grid-template-columns: 1fr 1fr !important;
-                gap: 6px !important;
+                gap: ${D(6)} !important;
                 width: 100% !important;
                 box-sizing: border-box !important;
                 flex-shrink: 0;
             }
             .mpActionRow .styledButton {
                 box-sizing: border-box !important;
-                height: 28px !important;
-                min-height: 28px !important;
-                max-height: 28px !important;
-                padding: 0 6px !important;
-                font-size: 10px !important;
-                line-height: 26px !important;
+                height: ${D(28)} !important;
+                min-height: ${D(28)} !important;
+                max-height: ${D(28)} !important;
+                padding: 0 ${D(6)} !important;
+                font-size: ${D(10)} !important;
+                line-height: ${D(26)} !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
@@ -495,33 +593,33 @@ const MULTIPLAYER_CSS = `
                 overflow: hidden !important;
                 text-overflow: ellipsis !important;
                 margin: 0 !important;
-                border-radius: 4px !important;
+                border-radius: ${D(4)} !important;
                 cursor: pointer !important;
             }
             .mpChatBox {
                 display: flex;
                 flex-direction: column;
-                gap: 6px;
+                gap: ${D(6)};
                 border-top: 1px solid rgba(148, 163, 184, 0.2);
-                padding-top: 6px;
+                padding-top: ${D(6)};
                 box-sizing: border-box;
                 width: 100%;
                 flex-shrink: 0;
             }
             .mpChatMessages {
-                height: 80px;
-                max-height: 110px;
+                height: ${D(80)};
+                max-height: ${D(110)};
                 overflow-y: auto;
                 overflow-x: hidden;
-                font-size: 11px;
+                font-size: ${D(11)};
                 display: flex;
                 flex-direction: column;
-                gap: 3px;
+                gap: ${D(3)};
                 word-break: break-word;
                 background: rgba(15, 23, 42, 0.6);
                 border: 1px solid rgba(51, 65, 85, 0.6);
-                border-radius: 4px;
-                padding: 5px 7px;
+                border-radius: ${D(4)};
+                padding: ${D(5)} ${D(7)};
                 box-sizing: border-box;
             }
             .mpChatLine {
@@ -533,7 +631,7 @@ const MULTIPLAYER_CSS = `
             }
             .mpChatInputRow {
                 display: flex !important;
-                gap: 6px !important;
+                gap: ${D(6)} !important;
                 align-items: center !important;
                 width: 100% !important;
                 box-sizing: border-box !important;
@@ -542,16 +640,16 @@ const MULTIPLAYER_CSS = `
                 flex: 1 1 auto !important;
                 min-width: 0 !important;
                 width: auto !important;
-                height: 28px !important;
-                line-height: 26px !important;
+                height: ${D(28)} !important;
+                line-height: ${D(26)} !important;
                 margin: 0 !important;
                 background: #0f172a !important;
                 background-color: #0f172a !important;
                 color: #ffffff !important;
                 border: 1px solid #334155 !important;
-                border-radius: 4px !important;
-                padding: 0 8px !important;
-                font-size: 11px !important;
+                border-radius: ${D(4)} !important;
+                padding: 0 ${D(8)} !important;
+                font-size: ${D(11)} !important;
                 box-sizing: border-box !important;
                 display: block !important;
                 user-select: text !important;
@@ -564,55 +662,63 @@ const MULTIPLAYER_CSS = `
             }
             .mpChatSendBtn {
                 flex: 0 0 auto !important;
-                height: 28px !important;
-                min-height: 28px !important;
-                max-height: 28px !important;
-                line-height: 26px !important;
+                height: ${D(28)} !important;
+                min-height: ${D(28)} !important;
+                max-height: ${D(28)} !important;
+                line-height: ${D(26)} !important;
                 margin: 0 !important;
-                font-size: 10px !important;
-                padding: 0 12px !important;
+                font-size: ${D(10)} !important;
+                padding: 0 ${D(12)} !important;
                 box-sizing: border-box !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                border-radius: 4px !important;
+                border-radius: ${D(4)} !important;
                 cursor: pointer !important;
             }
 
             /* Dedicated Clean Scrollbars inside HUD Panel & Modals */
             .mpHudPanel ::-webkit-scrollbar,
-            .mpModalCard ::-webkit-scrollbar {
-                width: 5px !important;
-                height: 5px !important;
+            .mpModalCard ::-webkit-scrollbar,
+            .mpModalCard::-webkit-scrollbar,
+            .mpFriendsList::-webkit-scrollbar {
+                width: ${D(6)} !important;
+                height: ${D(6)} !important;
             }
             .mpHudPanel ::-webkit-scrollbar-track,
-            .mpModalCard ::-webkit-scrollbar-track {
+            .mpModalCard ::-webkit-scrollbar-track,
+            .mpModalCard::-webkit-scrollbar-track,
+            .mpFriendsList::-webkit-scrollbar-track {
                 background: rgba(15, 23, 42, 0.4) !important;
-                border-radius: 3px !important;
+                border-radius: ${D(3)} !important;
             }
             .mpHudPanel ::-webkit-scrollbar-thumb,
-            .mpModalCard ::-webkit-scrollbar-thumb {
+            .mpModalCard ::-webkit-scrollbar-thumb,
+            .mpModalCard::-webkit-scrollbar-thumb,
+            .mpFriendsList::-webkit-scrollbar-thumb {
                 background: #475569 !important;
-                border-radius: 3px !important;
+                border-radius: ${D(3)} !important;
             }
             .mpHudPanel ::-webkit-scrollbar-thumb:hover,
-            .mpModalCard ::-webkit-scrollbar-thumb:hover {
+            .mpModalCard ::-webkit-scrollbar-thumb:hover,
+            .mpModalCard::-webkit-scrollbar-thumb:hover,
+            .mpFriendsList::-webkit-scrollbar-thumb:hover {
                 background: #64748b !important;
             }
 
             /* Toast & Invite Banner */
             .mpToastNotification {
                 position: fixed;
-                bottom: 24px;
+                bottom: ${D(24)};
                 left: 50%;
-                transform: translateX(-50%) translateY(20px);
+                transform: translateX(-50%) translateY(${D(20)});
                 background: rgba(15, 23, 42, 0.95);
                 color: #66c0f4;
                 border: 1.5px solid #66c0f4;
-                border-radius: 6px;
-                padding: 9px 18px;
+                border-radius: ${D(6)};
+                padding: ${D(9)} ${D(18)};
                 font-family: GameFont, sans-serif;
-                font-size: 13px;
+                font-size: ${D(13)};
                 z-index: 100000;
                 opacity: 0;
                 pointer-events: none;
@@ -624,29 +730,29 @@ const MULTIPLAYER_CSS = `
             }
             .mpInviteBanner {
                 position: fixed;
-                top: 20px;
-                right: 20px;
+                top: ${D(20)};
+                right: ${D(20)};
                 background: #1b2838;
                 border: 2px solid #4ade80;
-                border-radius: 8px;
-                padding: 12px 16px;
+                border-radius: ${D(8)};
+                padding: ${D(12)} ${D(16)};
                 color: #ffffff;
                 z-index: 100001;
                 display: flex;
                 align-items: center;
-                gap: 14px;
-                box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+                gap: ${D(14)};
+                box-shadow: 0 ${D(12)} ${D(32)} rgba(0, 0, 0, 0.6);
                 font-family: GameFont, sans-serif;
             }
             .mpInviteText {
                 display: flex;
                 flex-direction: column;
-                font-size: 12px;
-                gap: 3px;
+                font-size: ${D(12)};
+                gap: ${D(3)};
             }
             .mpInviteBtns {
                 display: flex;
-                gap: 6px;
+                gap: ${D(6)};
             }
 
             /* Joining & World Sync Progress Overlay */
@@ -662,24 +768,24 @@ const MULTIPLAYER_CSS = `
                 backdrop-filter: blur(4px);
             }
             .mpJoinCard {
-                width: min(440px, 90vw);
+                width: min(${D(440)}, 90vw);
                 background: #1b2838;
                 border: 2px solid #66c0f4;
-                border-radius: 10px;
-                padding: 24px;
-                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
+                border-radius: ${D(10)};
+                padding: ${D(24)};
+                box-shadow: 0 ${D(20)} ${D(50)} rgba(0, 0, 0, 0.85);
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 text-align: center;
-                gap: 12px;
+                gap: ${D(12)};
                 color: #e5e7eb;
                 box-sizing: border-box;
             }
             .mpJoinSpinner {
-                width: 38px;
-                height: 38px;
-                border: 4px solid rgba(102, 192, 244, 0.2);
+                width: ${D(38)};
+                height: ${D(38)};
+                border: ${D(4)} solid rgba(102, 192, 244, 0.2);
                 border-top-color: #66c0f4;
                 border-radius: 50%;
                 animation: mpSpin 0.9s linear infinite;
@@ -689,24 +795,24 @@ const MULTIPLAYER_CSS = `
             }
             .mpJoinTitle {
                 margin: 0;
-                font-size: 18px;
+                font-size: ${D(18)};
                 color: #ffffff;
             }
             .mpJoinStatus {
                 margin: 0;
-                font-size: 13px;
+                font-size: ${D(13)};
                 color: #94a3b8;
-                min-height: 20px;
+                min-height: ${D(20)};
                 word-break: break-word;
             }
             .mpJoinProgressContainer {
                 width: 100%;
-                height: 8px;
+                height: ${D(8)};
                 background: #0f172a;
                 border: 1px solid #334155;
-                border-radius: 4px;
+                border-radius: ${D(4)};
                 overflow: hidden;
-                margin-top: 4px;
+                margin-top: ${D(4)};
                 box-sizing: border-box;
             }
             .mpJoinProgressBar {
@@ -716,11 +822,11 @@ const MULTIPLAYER_CSS = `
                 transition: width 0.2s ease-out;
             }
             .mpCancelJoinBtn {
-                margin-top: 8px !important;
+                margin-top: ${D(8)} !important;
                 background: #334155 !important;
                 color: #cbd5e1 !important;
-                font-size: 12px !important;
-                padding: 6px 16px !important;
+                font-size: ${D(12)} !important;
+                padding: ${D(6)} ${D(16)} !important;
             }
             .mpCancelJoinBtn:hover {
                 background: #475569 !important;
@@ -739,6 +845,7 @@ function injectStyles(modInterface) {
 }
 
 module.exports = {
+    D,
     MULTIPLAYER_CSS,
     injectStyles,
 };

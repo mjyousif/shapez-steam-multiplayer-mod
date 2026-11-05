@@ -292,29 +292,10 @@ async function openMultiplayerModal(mod, mainMenuState = null) {
     mod.modalEl = overlay;
 
     const modalCard = overlay.querySelector(".mpModalCard");
-    const friendsList = overlay.querySelector(".mpFriendsList");
     if (modalCard) {
         modalCard.addEventListener("mousedown", ev => ev.stopPropagation());
-        modalCard.addEventListener(
-            "wheel",
-            ev => {
-                ev.stopPropagation();
-                modalCard.scrollTop += ev.deltaY;
-            },
-            { passive: false }
-        );
     }
-    if (friendsList) {
-        friendsList.addEventListener(
-            "wheel",
-            ev => {
-                ev.stopPropagation();
-                friendsList.scrollTop += ev.deltaY;
-            },
-            { passive: false }
-        );
-    }
-    overlay.addEventListener("wheel", ev => ev.stopPropagation(), { passive: false });
+    overlay.addEventListener("wheel", ev => ev.stopPropagation(), { passive: true });
 
     overlay.querySelector(".mpCloseModalBtn").addEventListener("click", () => closeMultiplayerModal(mod));
     overlay.addEventListener("click", ev => {
